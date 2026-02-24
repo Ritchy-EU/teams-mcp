@@ -1,0 +1,24 @@
+// Azure AD application configuration.
+//
+// IMPORTANT: The built-in CLIENT_ID is the public Microsoft Graph CLI app registration
+// (a shared app owned by Microsoft). It is suitable for personal / developer use but
+// you should register your own Azure AD app for any production or organisational deployment.
+//
+// To use your own app registration set the following environment variables:
+//   AZURE_CLIENT_ID  — Application (client) ID from Azure Portal > App registrations
+//   AZURE_TENANT_ID  — Directory (tenant) ID, or "common" for multi-tenant
+//
+// To register a new app:
+//   1. Azure Portal → Azure Active Directory → App registrations → New registration
+//   2. Choose "Public client / native" redirect URI type
+//   3. Add the required API permissions (same as DELEGATED_SCOPES in graph.ts)
+//   4. Copy the Application (client) ID and Directory (tenant) ID
+const clientId = process.env.AZURE_CLIENT_ID;
+if (!clientId) {
+    throw new Error("AZURE_CLIENT_ID environment variable is required. " +
+        "Set it via: claude mcp add --scope user teams-mcp -e AZURE_CLIENT_ID=<your-client-id> -e AZURE_TENANT_ID=<your-tenant-id> -- npx -y @ritchy-eu/teams-mcp@latest");
+}
+export const CLIENT_ID = clientId;
+const tenantId = process.env.AZURE_TENANT_ID ?? "common";
+export const AUTHORITY = `https://login.microsoftonline.com/${tenantId}`;
+//# sourceMappingURL=config.js.map
