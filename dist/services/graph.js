@@ -89,7 +89,7 @@ export class GraphService {
             account: this.msalAccount,
         });
         if (!result) {
-            throw new Error("Failed to acquire access token. Please re-authenticate: npx @ritchy-eu/teams-mcp@latest authenticate");
+            throw new Error("Failed to acquire access token. Please re-authenticate: npx -y github:Ritchy-EU/teams-mcp authenticate");
         }
         this.tokenExpiresAt = result.expiresOn ?? undefined;
         return result.accessToken;
@@ -116,7 +116,7 @@ export class GraphService {
     async getClient() {
         await this.initializeClient();
         if (!this.client) {
-            throw new Error("Not authenticated. Please run the authentication CLI tool first: npx @ritchy-eu/teams-mcp@latest authenticate");
+            throw new Error("Not authenticated. Please run the authentication CLI tool first: npx -y github:Ritchy-EU/teams-mcp authenticate");
         }
         return this.client;
     }

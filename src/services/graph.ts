@@ -111,7 +111,7 @@ export class GraphService {
 
     if (!result) {
       throw new Error(
-        "Failed to acquire access token. Please re-authenticate: npx @ritchy-eu/teams-mcp@latest authenticate"
+        "Failed to acquire access token. Please re-authenticate: npx -y github:Ritchy-EU/teams-mcp authenticate"
       );
     }
 
@@ -145,7 +145,7 @@ export class GraphService {
 
     if (!this.client) {
       throw new Error(
-        "Not authenticated. Please run the authentication CLI tool first: npx @ritchy-eu/teams-mcp@latest authenticate"
+        "Not authenticated. Please run the authentication CLI tool first: npx -y github:Ritchy-EU/teams-mcp authenticate"
       );
     }
     return this.client;

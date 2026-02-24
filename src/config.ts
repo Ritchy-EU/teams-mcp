@@ -18,7 +18,7 @@ const clientId = process.env.AZURE_CLIENT_ID;
 if (!clientId) {
   throw new Error(
     "AZURE_CLIENT_ID environment variable is required. " +
-      "Set it via: claude mcp add --scope user teams-mcp -e AZURE_CLIENT_ID=<your-client-id> -e AZURE_TENANT_ID=<your-tenant-id> -- npx -y @ritchy-eu/teams-mcp@latest"
+      "Set it via: claude mcp add --scope user teams-mcp -e AZURE_CLIENT_ID=<your-client-id> -e AZURE_TENANT_ID=<your-tenant-id> -- npx -y github:Ritchy-EU/teams-mcp"
   );
 }
 export const CLIENT_ID = clientId;

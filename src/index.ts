@@ -151,7 +151,7 @@ async function logout() {
   }
 
   console.log("✅ Successfully logged out");
-  console.log("🔄 Run 'npx @ritchy-eu/teams-mcp@latest authenticate' to re-authenticate");
+  console.log("🔄 Run 'npx -y github:Ritchy-EU/teams-mcp authenticate' to re-authenticate");
 }
 
 // MCP Server setup
@@ -201,10 +201,10 @@ async function main() {
       console.log("Microsoft Graph MCP Server");
       console.log("");
       console.log("Usage:");
-      console.log("  npx @ritchy-eu/teams-mcp@latest authenticate # Authenticate with Microsoft");
-      console.log("  npx @ritchy-eu/teams-mcp@latest check        # Check authentication status");
-      console.log("  npx @ritchy-eu/teams-mcp@latest logout       # Clear authentication");
-      console.log("  npx @ritchy-eu/teams-mcp@latest              # Start MCP server (default)");
+      console.log("  npx -y github:Ritchy-EU/teams-mcp authenticate # Authenticate with Microsoft");
+      console.log("  npx -y github:Ritchy-EU/teams-mcp check        # Check authentication status");
+      console.log("  npx -y github:Ritchy-EU/teams-mcp logout       # Clear authentication");
+      console.log("  npx -y github:Ritchy-EU/teams-mcp              # Start MCP server (default)");
       return;
     case undefined:
       // No command = start MCP server

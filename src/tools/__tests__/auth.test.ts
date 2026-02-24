@@ -58,7 +58,7 @@ describe("Authentication Tools", () => {
         content: [
           {
             type: "text",
-            text: "❌ Not authenticated. Please run: npx @ritchy-eu/teams-mcp@latest authenticate",
+            text: "❌ Not authenticated. Please run: npx -y github:Ritchy-EU/teams-mcp authenticate",
           },
         ],
       });

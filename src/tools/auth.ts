@@ -15,7 +15,7 @@ export function registerAuthTools(server: McpServer, graphService: GraphService)
             type: "text",
             text: status.isAuthenticated
               ? `✅ Authenticated as ${status.displayName || "Unknown User"} (${status.userPrincipalName || "No email available"})`
-              : "❌ Not authenticated. Please run: npx @ritchy-eu/teams-mcp@latest authenticate",
+              : "❌ Not authenticated. Please run: npx -y github:Ritchy-EU/teams-mcp authenticate",
           },
         ],
       };
