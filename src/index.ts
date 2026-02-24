@@ -10,7 +10,7 @@ import {
 } from "@azure/msal-node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CLIENT_ID, AUTHORITY } from "./config.js";
+import { AUTHORITY, CLIENT_ID } from "./config.js";
 import { cachePlugin } from "./msal-cache.js";
 import { GraphService } from "./services/graph.js";
 import { registerAuthTools } from "./tools/auth.js";
@@ -201,12 +201,8 @@ async function main() {
       console.log("Microsoft Graph MCP Server");
       console.log("");
       console.log("Usage:");
-      console.log(
-        "  npx @ritchy-eu/teams-mcp@latest authenticate # Authenticate with Microsoft"
-      );
-      console.log(
-        "  npx @ritchy-eu/teams-mcp@latest check        # Check authentication status"
-      );
+      console.log("  npx @ritchy-eu/teams-mcp@latest authenticate # Authenticate with Microsoft");
+      console.log("  npx @ritchy-eu/teams-mcp@latest check        # Check authentication status");
       console.log("  npx @ritchy-eu/teams-mcp@latest logout       # Clear authentication");
       console.log("  npx @ritchy-eu/teams-mcp@latest              # Start MCP server (default)");
       return;

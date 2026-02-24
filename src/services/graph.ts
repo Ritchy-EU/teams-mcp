@@ -1,6 +1,6 @@
 import { type AccountInfo, PublicClientApplication } from "@azure/msal-node";
 import { Client } from "@microsoft/microsoft-graph-client";
-import { CLIENT_ID, AUTHORITY } from "../config.js";
+import { AUTHORITY, CLIENT_ID } from "../config.js";
 import { cachePlugin } from "../msal-cache.js";
 
 const DELEGATED_SCOPES = [
@@ -180,10 +180,7 @@ export class GraphService {
 
       // Check issuer
       if (typeof payload.iss === "string") {
-        const validIssuers = [
-          "https://login.microsoftonline.com/",
-          "https://sts.windows.net/",
-        ];
+        const validIssuers = ["https://login.microsoftonline.com/", "https://sts.windows.net/"];
         if (!validIssuers.some((prefix) => payload.iss.startsWith(prefix))) {
           console.error("Invalid JWT token: Unrecognized issuer");
           return undefined;
