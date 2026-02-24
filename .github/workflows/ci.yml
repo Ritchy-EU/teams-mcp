@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22, 24]
+
+    env:
+      AZURE_CLIENT_ID: "test-client-id"
+      AZURE_TENANT_ID: "test-tenant-id"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          # Clean install to handle platform-specific binary issues
+          rm -rf node_modules package-lock.json
+          npm install
+
+      - name: Run linting and formatting
+        run: |
+          npm run ci
+
+      - name: Run type checking
+        run: npm run compile
+
+      - name: Run tests
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Test CLI functionality
+        run: |
+          node dist/index.js --help
+          node dist/index.js check
+
+      - name: Security audit
+        run: npm audit --audit-level moderate
