@@ -9,7 +9,6 @@ const DELEGATED_SCOPES = [
   "Team.ReadBasic.All",
   "Channel.ReadBasic.All",
   "ChannelMessage.Read.All",
-  "ChannelMessage.Send",
   "TeamMember.Read.All",
   "Chat.ReadBasic",
   "Chat.ReadWrite",
