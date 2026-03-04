@@ -19,7 +19,6 @@ export class GraphService {
     tokenExpiresAt;
     msalApp;
     msalAccount;
-    pendingDeviceCodeAuth;
     static getInstance() {
         if (!GraphService.instance) {
             GraphService.instance = new GraphService();
@@ -134,7 +133,7 @@ export class GraphService {
                     cachePlugin,
                 },
             });
-            this.pendingDeviceCodeAuth = msalApp.acquireTokenByDeviceCode({
+            const pendingAuth = msalApp.acquireTokenByDeviceCode({
                 scopes: DELEGATED_SCOPES,
                 deviceCodeCallback: (response) => {
                     resolve({
@@ -145,9 +144,9 @@ export class GraphService {
                 },
             });
             // If device code request itself fails (network error etc.), reject immediately
-            this.pendingDeviceCodeAuth.catch(reject);
+            pendingAuth.catch(reject);
             // When auth completes successfully, re-initialize the Graph client
-            this.pendingDeviceCodeAuth
+            pendingAuth
                 .then(async (result) => {
                 if (result) {
                     this.isInitialized = false;

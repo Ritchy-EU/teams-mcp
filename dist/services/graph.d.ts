@@ -12,7 +12,6 @@ export declare class GraphService {
     private tokenExpiresAt;
     private msalApp;
     private msalAccount;
-    private pendingDeviceCodeAuth;
     static getInstance(): GraphService;
     private initializeClient;
     private acquireToken;

@@ -1,4 +1,4 @@
-import { type AccountInfo, type AuthenticationResult, PublicClientApplication } from "@azure/msal-node";
+import { type AccountInfo, PublicClientApplication } from "@azure/msal-node";
 import { Client } from "@microsoft/microsoft-graph-client";
 import { AUTHORITY, CLIENT_ID } from "../config.js";
 import { cachePlugin } from "../msal-cache.js";
@@ -28,7 +28,6 @@ export class GraphService {
   private tokenExpiresAt: Date | undefined;
   private msalApp: PublicClientApplication | undefined;
   private msalAccount: AccountInfo | undefined;
-  private pendingDeviceCodeAuth: Promise<AuthenticationResult | null> | undefined;
 
   static getInstance(): GraphService {
     if (!GraphService.instance) {
@@ -144,9 +143,7 @@ export class GraphService {
     await this.initializeClient();
 
     if (!this.client) {
-      throw new Error(
-        "Not authenticated. Run /ms-teams:authenticate in Claude Code to sign in."
-      );
+      throw new Error("Not authenticated. Run /ms-teams:authenticate in Claude Code to sign in.");
     }
     return this.client;
   }
@@ -155,7 +152,11 @@ export class GraphService {
     return !!this.client && this.isInitialized;
   }
 
-  async startDeviceCodeAuth(): Promise<{ verificationUri: string; userCode: string; expiresIn: number }> {
+  async startDeviceCodeAuth(): Promise<{
+    verificationUri: string;
+    userCode: string;
+    expiresIn: number;
+  }> {
     return new Promise((resolve, reject) => {
       const msalApp = new PublicClientApplication({
         auth: {
@@ -167,7 +168,7 @@ export class GraphService {
         },
       });
 
-      this.pendingDeviceCodeAuth = msalApp.acquireTokenByDeviceCode({
+      const pendingAuth = msalApp.acquireTokenByDeviceCode({
         scopes: DELEGATED_SCOPES,
         deviceCodeCallback: (response) => {
           resolve({
@@ -177,12 +178,11 @@ export class GraphService {
           });
         },
       });
-
       // If device code request itself fails (network error etc.), reject immediately
-      this.pendingDeviceCodeAuth.catch(reject);
+      pendingAuth.catch(reject);
 
       // When auth completes successfully, re-initialize the Graph client
-      this.pendingDeviceCodeAuth
+      pendingAuth
         .then(async (result) => {
           if (result) {
             this.isInitialized = false;
