@@ -161,7 +161,7 @@ describe("GraphService", () => {
       } as any);
 
       await expect(graphService.getClient()).rejects.toThrow(
-        "Not authenticated. Please run the authentication CLI tool first"
+        "Not authenticated. Run /ms-teams:authenticate in Claude Code to sign in."
       );
     });
 

@@ -58,7 +58,7 @@ describe("Authentication Tools", () => {
         content: [
           {
             type: "text",
-            text: "❌ Not authenticated. Please run: npx -y github:Ritchy-EU/teams-mcp authenticate",
+            text: "❌ Not authenticated. Use the start_authentication tool or run /ms-teams:authenticate to sign in.",
           },
         ],
       });
@@ -135,7 +135,8 @@ describe("Authentication Tools", () => {
 
       const registeredTools = mockServer.getAllTools();
       expect(registeredTools).toContain("auth_status");
-      expect(registeredTools).toHaveLength(1);
+      expect(registeredTools).toContain("start_authentication");
+      expect(registeredTools).toHaveLength(2);
     });
 
     it("should handle GraphService being undefined", () => {
