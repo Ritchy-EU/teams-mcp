@@ -12,12 +12,18 @@ export declare class GraphService {
     private tokenExpiresAt;
     private msalApp;
     private msalAccount;
+    private pendingDeviceCodeAuth;
     static getInstance(): GraphService;
     private initializeClient;
     private acquireToken;
     getAuthStatus(): Promise<AuthStatus>;
     getClient(): Promise<Client>;
     isAuthenticated(): boolean;
+    startDeviceCodeAuth(): Promise<{
+        verificationUri: string;
+        userCode: string;
+        expiresIn: number;
+    }>;
     validateToken(token: string): string | undefined;
 }
 //# sourceMappingURL=graph.d.ts.map

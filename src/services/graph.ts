@@ -1,4 +1,4 @@
-import { type AccountInfo, PublicClientApplication } from "@azure/msal-node";
+import { type AccountInfo, type AuthenticationResult, PublicClientApplication } from "@azure/msal-node";
 import { Client } from "@microsoft/microsoft-graph-client";
 import { AUTHORITY, CLIENT_ID } from "../config.js";
 import { cachePlugin } from "../msal-cache.js";
@@ -28,6 +28,7 @@ export class GraphService {
   private tokenExpiresAt: Date | undefined;
   private msalApp: PublicClientApplication | undefined;
   private msalAccount: AccountInfo | undefined;
+  private pendingDeviceCodeAuth: Promise<AuthenticationResult | null> | undefined;
 
   static getInstance(): GraphService {
     if (!GraphService.instance) {
@@ -110,7 +111,7 @@ export class GraphService {
 
     if (!result) {
       throw new Error(
-        "Failed to acquire access token. Please re-authenticate: npx -y github:Ritchy-EU/teams-mcp authenticate"
+        "Failed to acquire access token. Run /ms-teams:authenticate in Claude Code to sign in again."
       );
     }
 
@@ -144,7 +145,7 @@ export class GraphService {
 
     if (!this.client) {
       throw new Error(
-        "Not authenticated. Please run the authentication CLI tool first: npx -y github:Ritchy-EU/teams-mcp authenticate"
+        "Not authenticated. Run /ms-teams:authenticate in Claude Code to sign in."
       );
     }
     return this.client;
@@ -152,6 +153,46 @@ export class GraphService {
 
   isAuthenticated(): boolean {
     return !!this.client && this.isInitialized;
+  }
+
+  async startDeviceCodeAuth(): Promise<{ verificationUri: string; userCode: string; expiresIn: number }> {
+    return new Promise((resolve, reject) => {
+      const msalApp = new PublicClientApplication({
+        auth: {
+          clientId: CLIENT_ID,
+          authority: AUTHORITY,
+        },
+        cache: {
+          cachePlugin,
+        },
+      });
+
+      this.pendingDeviceCodeAuth = msalApp.acquireTokenByDeviceCode({
+        scopes: DELEGATED_SCOPES,
+        deviceCodeCallback: (response) => {
+          resolve({
+            verificationUri: response.verificationUri,
+            userCode: response.userCode,
+            expiresIn: response.expiresIn,
+          });
+        },
+      });
+
+      // If device code request itself fails (network error etc.), reject immediately
+      this.pendingDeviceCodeAuth.catch(reject);
+
+      // When auth completes successfully, re-initialize the Graph client
+      this.pendingDeviceCodeAuth
+        .then(async (result) => {
+          if (result) {
+            this.isInitialized = false;
+            await this.initializeClient();
+          }
+        })
+        .catch((err) => {
+          console.error("Device code authentication failed:", err);
+        });
+    });
   }
 
   validateToken(token: string): string | undefined {
