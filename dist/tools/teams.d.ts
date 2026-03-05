@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 /**
  * Registers all Teams-related MCP tools on the given server.
  * Tools include: list_teams, list_channels, get_channel_messages,
@@ -10,5 +10,5 @@ import type { GraphService } from "../services/graph.js";
  * @param server - The MCP server instance to register tools on.
  * @param graphService - The Microsoft Graph service used for API calls.
  */
-export declare function registerTeamsTools(server: McpServer, graphService: GraphService): void;
+export declare function registerTeamsTools(server: McpServer, graphService: IGraphService): void;
 //# sourceMappingURL=teams.d.ts.map

@@ -1,4 +1,4 @@
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 export interface ImageAttachment {
     id: string;
     contentType: string;
@@ -15,7 +15,7 @@ export interface HostedContent {
  * Upload image as hosted content for Teams messages
  * This creates a temporary hosted content that can be referenced in message attachments
  */
-export declare function uploadImageAsHostedContent(graphService: GraphService, teamId: string, channelId: string, imageData: Buffer | string, contentType: string, fileName?: string): Promise<{
+export declare function uploadImageAsHostedContent(graphService: IGraphService, teamId: string, channelId: string, imageData: Buffer | string, contentType: string, fileName?: string): Promise<{
     hostedContentId: string;
     attachment: ImageAttachment;
 } | null>;

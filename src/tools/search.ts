@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 import type { SearchHit, SearchRequest, SearchResponse } from "../types/graph.js";
 
 /**
@@ -24,7 +24,7 @@ export function formatSearchHits(hits: SearchHit[]) {
   }));
 }
 
-export function registerSearchTools(server: McpServer, graphService: GraphService) {
+export function registerSearchTools(server: McpServer, graphService: IGraphService) {
   server.tool(
     "search_messages",
     [

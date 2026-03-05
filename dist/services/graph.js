@@ -12,6 +12,90 @@ const DELEGATED_SCOPES = [
     "Chat.ReadBasic",
     "Chat.ReadWrite",
 ];
+/**
+ * Validate a Microsoft Graph JWT token (shared logic).
+ */
+export function validateGraphToken(token) {
+    const tokenSplits = token.split(".");
+    if (tokenSplits.length !== 3) {
+        console.error("Invalid JWT token: missing claims");
+        return undefined;
+    }
+    try {
+        const payload = JSON.parse(atob(tokenSplits[1]));
+        // Microsoft Graph tokens may use either the URL or the GUID as audience:
+        //   v1 format: "https://graph.microsoft.com"
+        //   v2 format: "00000003-0000-0000-c000-000000000000" (Graph API app ID)
+        const VALID_GRAPH_AUDIENCES = [
+            "https://graph.microsoft.com",
+            "00000003-0000-0000-c000-000000000000",
+        ];
+        const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+        if (!audiences.some((aud) => VALID_GRAPH_AUDIENCES.includes(aud))) {
+            console.error(`Invalid JWT token: Not a valid Microsoft Graph token (aud=${JSON.stringify(payload.aud)})`);
+            return undefined;
+        }
+        if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+            console.error("Invalid JWT token: Token has expired");
+            return undefined;
+        }
+        if (typeof payload.iss === "string") {
+            const validIssuers = ["https://login.microsoftonline.com/", "https://sts.windows.net/"];
+            if (!validIssuers.some((prefix) => payload.iss.startsWith(prefix))) {
+                console.error("Invalid JWT token: Unrecognized issuer");
+                return undefined;
+            }
+        }
+    }
+    catch (error) {
+        console.error("Invalid JWT token: Failed to parse payload", error);
+        return undefined;
+    }
+    return token;
+}
+/**
+ * Graph service for HTTP mode: uses a per-session token accessor instead of MSAL cache.
+ */
+export class SessionGraphService {
+    tokenAccessor;
+    client;
+    constructor(tokenAccessor) {
+        this.tokenAccessor = tokenAccessor;
+        this.client = Client.initWithMiddleware({
+            authProvider: {
+                getAccessToken: () => this.tokenAccessor(),
+            },
+        });
+    }
+    async getClient() {
+        return this.client;
+    }
+    async getAuthStatus() {
+        try {
+            const me = await this.client.api("/me").get();
+            return {
+                isAuthenticated: true,
+                userPrincipalName: me?.userPrincipalName ?? undefined,
+                displayName: me?.displayName ?? undefined,
+            };
+        }
+        catch {
+            return { isAuthenticated: false };
+        }
+    }
+    isAuthenticated() {
+        return true;
+    }
+    async startDeviceCodeAuth() {
+        throw new Error("Device code authentication is not supported in HTTP mode. Authentication is handled via OAuth.");
+    }
+    validateToken(token) {
+        return validateGraphToken(token);
+    }
+}
+/**
+ * Graph service for stdio mode: singleton with MSAL-backed token cache.
+ */
 export class GraphService {
     static instance;
     client;
@@ -159,38 +243,7 @@ export class GraphService {
         });
     }
     validateToken(token) {
-        const tokenSplits = token.split(".");
-        if (tokenSplits.length !== 3) {
-            console.error("Invalid JWT token: missing claims");
-            return undefined;
-        }
-        try {
-            const payload = JSON.parse(atob(tokenSplits[1]));
-            // Check audience
-            const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-            if (!audiences.includes("https://graph.microsoft.com")) {
-                console.error("Invalid JWT token: Not a valid Microsoft Graph token");
-                return undefined;
-            }
-            // Check expiration
-            if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
-                console.error("Invalid JWT token: Token has expired");
-                return undefined;
-            }
-            // Check issuer
-            if (typeof payload.iss === "string") {
-                const validIssuers = ["https://login.microsoftonline.com/", "https://sts.windows.net/"];
-                if (!validIssuers.some((prefix) => payload.iss.startsWith(prefix))) {
-                    console.error("Invalid JWT token: Unrecognized issuer");
-                    return undefined;
-                }
-            }
-        }
-        catch (error) {
-            console.error("Invalid JWT token: Failed to parse payload", error);
-            return undefined;
-        }
-        return token;
+        return validateGraphToken(token);
     }
 }
 //# sourceMappingURL=graph.js.map

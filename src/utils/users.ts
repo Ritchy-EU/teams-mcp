@@ -1,4 +1,4 @@
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 import type { User } from "../types/graph.js";
 
 /**
@@ -19,7 +19,7 @@ export interface UserInfo {
  * Search for users by display name or email
  */
 export async function searchUsers(
-  graphService: GraphService,
+  graphService: IGraphService,
   query: string,
   limit = 10
 ): Promise<UserInfo[]> {
@@ -51,7 +51,7 @@ export async function searchUsers(
  * Get user by exact email or UPN
  */
 export async function getUserByEmail(
-  graphService: GraphService,
+  graphService: IGraphService,
   email: string
 ): Promise<UserInfo | null> {
   try {
@@ -74,7 +74,7 @@ export async function getUserByEmail(
  * Get user by ID
  */
 export async function getUserById(
-  graphService: GraphService,
+  graphService: IGraphService,
   userId: string
 ): Promise<UserInfo | null> {
   try {
@@ -104,7 +104,7 @@ export async function getUserById(
  */
 export async function parseMentions(
   text: string,
-  graphService: GraphService
+  graphService: IGraphService
 ): Promise<Array<{ mention: string; users: UserInfo[] }>> {
   // Match @mentions in the format @username, @email@domain.com, or @"User Name"
   const mentionRegex = /@(?:"([^"]+)"|([^\s@]+(?:@[^\s@]+\.[^\s@]+)?|[^\s@]+))/g;

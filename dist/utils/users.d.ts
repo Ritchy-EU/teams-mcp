@@ -1,4 +1,4 @@
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 export interface UserInfo {
     id: string;
     displayName: string;
@@ -7,22 +7,22 @@ export interface UserInfo {
 /**
  * Search for users by display name or email
  */
-export declare function searchUsers(graphService: GraphService, query: string, limit?: number): Promise<UserInfo[]>;
+export declare function searchUsers(graphService: IGraphService, query: string, limit?: number): Promise<UserInfo[]>;
 /**
  * Get user by exact email or UPN
  */
-export declare function getUserByEmail(graphService: GraphService, email: string): Promise<UserInfo | null>;
+export declare function getUserByEmail(graphService: IGraphService, email: string): Promise<UserInfo | null>;
 /**
  * Get user by ID
  */
-export declare function getUserById(graphService: GraphService, userId: string): Promise<UserInfo | null>;
+export declare function getUserById(graphService: IGraphService, userId: string): Promise<UserInfo | null>;
 /**
  * Parse @mentions from text and return user lookup suggestions
  * @param text - Message text containing @mentions
  * @param graphService - Graph service instance
  * @returns Array of mention patterns found and suggested users
  */
-export declare function parseMentions(text: string, graphService: GraphService): Promise<Array<{
+export declare function parseMentions(text: string, graphService: IGraphService): Promise<Array<{
     mention: string;
     users: UserInfo[];
 }>>;

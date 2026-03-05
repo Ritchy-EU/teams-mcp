@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 import type { GraphApiResponse, User, UserSummary } from "../types/graph.js";
 
 /**
@@ -10,7 +10,7 @@ function escapeODataString(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-export function registerUsersTools(server: McpServer, graphService: GraphService) {
+export function registerUsersTools(server: McpServer, graphService: IGraphService) {
   // Get current user
   server.tool(
     "get_current_user",

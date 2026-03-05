@@ -24,4 +24,10 @@ if (!clientId) {
 export const CLIENT_ID = clientId;
 
 const tenantId = process.env.AZURE_TENANT_ID ?? "common";
+export const TENANT_ID = tenantId;
 export const AUTHORITY = `https://login.microsoftonline.com/${tenantId}`;
+
+// HTTP server configuration (used in `serve` mode)
+export const PORT = parseInt(process.env.PORT || "3000", 10);
+export const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+export const AZURE_CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;

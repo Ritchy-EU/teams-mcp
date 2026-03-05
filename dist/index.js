@@ -172,6 +172,12 @@ async function main() {
         case "logout":
             await logout();
             return;
+        case "serve":
+        case "server": {
+            const { startHttpServer } = await import("./server/http.js");
+            await startHttpServer();
+            return;
+        }
         case "help":
         case "--help":
         case "-h":
@@ -181,7 +187,8 @@ async function main() {
             console.log("  npx -y github:Ritchy-EU/teams-mcp authenticate # Authenticate with Microsoft");
             console.log("  npx -y github:Ritchy-EU/teams-mcp check        # Check authentication status");
             console.log("  npx -y github:Ritchy-EU/teams-mcp logout       # Clear authentication");
-            console.log("  npx -y github:Ritchy-EU/teams-mcp              # Start MCP server (default)");
+            console.log("  npx -y github:Ritchy-EU/teams-mcp serve        # Start multi-user HTTP server");
+            console.log("  npx -y github:Ritchy-EU/teams-mcp              # Start MCP server (default, stdio)");
             return;
         case undefined:
             // No command = start MCP server

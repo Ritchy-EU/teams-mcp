@@ -24,6 +24,7 @@
     "auth": "node dist/index.js authenticate",
     "auth:check": "node dist/index.js check",
     "auth:logout": "node dist/index.js logout",
+    "serve": "node dist/index.js serve",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -53,12 +54,14 @@
     "@types/jsdom": "^27.0.0",
     "@types/marked": "^6.0.0",
     "dompurify": "^3.3.1",
+    "express": "^5.2.1",
     "jsdom": "^28.1.0",
     "marked": "^17.0.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.2",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.3.0",
     "@types/sinon": "^21.0.0",
     "@vitest/coverage-v8": "^4.0.18",

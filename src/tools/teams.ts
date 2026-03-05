@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 import type {
   Channel,
   ChannelSummary,
@@ -31,7 +31,7 @@ import { processMentionsInHtml, searchUsers, type UserInfo } from "../utils/user
  * @param server - The MCP server instance to register tools on.
  * @param graphService - The Microsoft Graph service used for API calls.
  */
-export function registerTeamsTools(server: McpServer, graphService: GraphService) {
+export function registerTeamsTools(server: McpServer, graphService: IGraphService) {
   // List user's teams
   server.tool(
     "list_teams",

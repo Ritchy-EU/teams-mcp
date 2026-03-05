@@ -1,4 +1,4 @@
-import type { GraphService } from "../services/graph.js";
+import type { IGraphService } from "../services/graph.js";
 
 export interface ImageAttachment {
   id: string;
@@ -19,7 +19,7 @@ export interface HostedContent {
  * This creates a temporary hosted content that can be referenced in message attachments
  */
 export async function uploadImageAsHostedContent(
-  graphService: GraphService,
+  graphService: IGraphService,
   teamId: string,
   channelId: string,
   imageData: Buffer | string,
