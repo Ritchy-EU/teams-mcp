@@ -12,6 +12,7 @@ import { registerAuthTools } from "../tools/auth.js";
 import { registerChatTools } from "../tools/chats.js";
 import { registerSearchTools } from "../tools/search.js";
 import { registerTeamsTools } from "../tools/teams.js";
+import { registerOrganizationTools } from "../tools/organization.js";
 import { registerUsersTools } from "../tools/users.js";
 import { MicrosoftEntraOAuthProvider } from "./auth-provider.js";
 import { SessionManager } from "./session-manager.js";
@@ -21,6 +22,7 @@ const DELEGATED_SCOPES = [
   "offline_access", // Enables refresh tokens for long-lived sessions
   "User.Read",
   "User.ReadBasic.All",
+  "User.Read.All",
   "Team.ReadBasic.All",
   "Channel.ReadBasic.All",
   "ChannelMessage.Read.All",
@@ -42,6 +44,7 @@ function createSessionServer(tokenAccessor: () => Promise<string>): {
 
   registerAuthTools(server, graphService);
   registerUsersTools(server, graphService);
+  registerOrganizationTools(server, graphService);
   registerTeamsTools(server, graphService);
   registerChatTools(server, graphService);
   registerSearchTools(server, graphService);

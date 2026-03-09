@@ -6,6 +6,7 @@ import { cachePlugin } from "../msal-cache.js";
 const DELEGATED_SCOPES = [
   "User.Read",
   "User.ReadBasic.All",
+  "User.Read.All",
   "Team.ReadBasic.All",
   "Channel.ReadBasic.All",
   "ChannelMessage.Read.All",

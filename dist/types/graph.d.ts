@@ -1,5 +1,5 @@
-import type { Channel, ChannelMembershipType, Chat, ChatMessage, ChatMessageImportance, ChatMessageInfo, ChatType, ConversationMember, NullableOption, Team, TeamSpecialization, TeamsAppInstallation, TeamVisibilityType, User } from "@microsoft/microsoft-graph-types";
-export type { User, Chat, Team, Channel, ChatMessage, ConversationMember, TeamsAppInstallation, ChatMessageInfo, ChannelMembershipType, ChatType, ChatMessageImportance, TeamSpecialization, TeamVisibilityType, NullableOption, };
+import type { Channel, ChannelMembershipType, Chat, ChatMessage, ChatMessageImportance, ChatMessageInfo, ChatType, ConversationMember, DirectoryObject, NullableOption, Team, TeamSpecialization, TeamsAppInstallation, TeamVisibilityType, User } from "@microsoft/microsoft-graph-types";
+export type { User, Chat, Team, Channel, ChatMessage, ConversationMember, DirectoryObject, TeamsAppInstallation, ChatMessageInfo, ChannelMembershipType, ChatType, ChatMessageImportance, TeamSpecialization, TeamVisibilityType, NullableOption, };
 export interface GraphApiResponse<T> {
     value?: T[];
     "@odata.count"?: number;
