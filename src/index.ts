@@ -10,7 +10,7 @@ import {
 } from "@azure/msal-node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { AUTHORITY, CLIENT_ID } from "./config.js";
+import { AUTHORITY, CLIENT_ID, DELEGATED_SCOPES } from "./config.js";
 import { cachePlugin } from "./msal-cache.js";
 import { GraphService } from "./services/graph.js";
 import { registerAuthTools } from "./tools/auth.js";
@@ -21,19 +21,6 @@ import { registerOrganizationTools } from "./tools/organization.js";
 import { registerUsersTools } from "./tools/users.js";
 
 const AUTH_INFO_PATH = join(homedir(), ".msgraph-mcp-auth.json");
-
-// Scopes for delegated (user) authentication
-const DELEGATED_SCOPES = [
-  "User.Read",
-  "User.ReadBasic.All",
-  "User.Read.All",
-  "Team.ReadBasic.All",
-  "Channel.ReadBasic.All",
-  "ChannelMessage.Read.All",
-  "TeamMember.Read.All",
-  "Chat.ReadBasic",
-  "Chat.ReadWrite",
-];
 
 // Authentication functions
 async function authenticate() {

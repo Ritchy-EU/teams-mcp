@@ -14,18 +14,10 @@ import { registerOrganizationTools } from "../tools/organization.js";
 import { registerUsersTools } from "../tools/users.js";
 import { MicrosoftEntraOAuthProvider } from "./auth-provider.js";
 import { SessionManager } from "./session-manager.js";
-import { PORT, BASE_URL } from "../config.js";
-const DELEGATED_SCOPES = [
+import { PORT, BASE_URL, DELEGATED_SCOPES } from "../config.js";
+const HTTP_SCOPES = [
     "offline_access", // Enables refresh tokens for long-lived sessions
-    "User.Read",
-    "User.ReadBasic.All",
-    "User.Read.All",
-    "Team.ReadBasic.All",
-    "Channel.ReadBasic.All",
-    "ChannelMessage.Read.All",
-    "TeamMember.Read.All",
-    "Chat.ReadBasic",
-    "Chat.ReadWrite",
+    ...DELEGATED_SCOPES,
 ];
 function createSessionServer(tokenAccessor) {
     const server = new McpServer({
@@ -81,7 +73,7 @@ export async function startHttpServer() {
     app.use(mcpAuthRouter({
         provider,
         issuerUrl: new URL(BASE_URL),
-        scopesSupported: DELEGATED_SCOPES,
+        scopesSupported: HTTP_SCOPES,
         resourceName: "Teams MCP Server",
     }));
     const authMiddleware = requireBearerAuth({

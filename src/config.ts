@@ -27,6 +27,20 @@ const tenantId = process.env.AZURE_TENANT_ID ?? "common";
 export const TENANT_ID = tenantId;
 export const AUTHORITY = `https://login.microsoftonline.com/${tenantId}`;
 
+// Scopes for delegated (user) authentication.
+// All modes (stdio, HTTP) share this base set of scopes.
+export const DELEGATED_SCOPES = [
+  "User.Read",
+  "User.ReadBasic.All",
+  "User.Read.All",
+  "Team.ReadBasic.All",
+  "Channel.ReadBasic.All",
+  "ChannelMessage.Read.All",
+  "TeamMember.Read.All",
+  "Chat.ReadBasic",
+  "Chat.ReadWrite",
+];
+
 // HTTP server configuration (used in `serve` mode)
 export const PORT = parseInt(process.env.PORT || "3000", 10);
 export const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;

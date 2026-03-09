@@ -1,19 +1,7 @@
 import { type AccountInfo, PublicClientApplication } from "@azure/msal-node";
 import { Client } from "@microsoft/microsoft-graph-client";
-import { AUTHORITY, CLIENT_ID } from "../config.js";
+import { AUTHORITY, CLIENT_ID, DELEGATED_SCOPES } from "../config.js";
 import { cachePlugin } from "../msal-cache.js";
-
-const DELEGATED_SCOPES = [
-  "User.Read",
-  "User.ReadBasic.All",
-  "User.Read.All",
-  "Team.ReadBasic.All",
-  "Channel.ReadBasic.All",
-  "ChannelMessage.Read.All",
-  "TeamMember.Read.All",
-  "Chat.ReadBasic",
-  "Chat.ReadWrite",
-];
 
 export interface AuthStatus {
   isAuthenticated: boolean;
