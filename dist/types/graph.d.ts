@@ -42,12 +42,19 @@ export interface ChatSummary {
     chatType?: ChatType | undefined;
     memberCount?: number | undefined;
 }
+export interface AttachmentSummary {
+    id?: NullableOption<string> | undefined;
+    name?: NullableOption<string> | undefined;
+    contentType?: NullableOption<string> | undefined;
+    contentUrl?: NullableOption<string> | undefined;
+}
 export interface MessageSummary {
     id?: string | undefined;
     content?: NullableOption<string> | undefined;
     from?: NullableOption<string> | undefined;
     createdDateTime?: NullableOption<string> | undefined;
     importance?: ChatMessageImportance | undefined;
+    attachments?: AttachmentSummary[] | undefined;
 }
 export interface MemberSummary {
     id?: string | undefined;

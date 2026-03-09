@@ -39,6 +39,7 @@ export const DELEGATED_SCOPES = [
   "TeamMember.Read.All",
   "Chat.ReadBasic",
   "Chat.ReadWrite",
+  "Files.Read.All",
 ];
 
 // HTTP server configuration (used in `serve` mode)
