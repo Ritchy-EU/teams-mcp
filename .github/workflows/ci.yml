@@ -51,8 +51,7 @@ jobs:
           node dist/index.js check
 
       - name: Security audit
-        # Fails on high/critical. Accepted moderates (2026-08): uuid via
-        # @azure/msal-node v2 (msal never calls the vulnerable v3/v5/v6+buf
-        # path; the real fix is the msal-node v5 major upgrade) and the
-        # esbuild dev-server advisory (dev-only toolchain, never runs in CI).
-        run: npm audit --audit-level high
+        # Fails on moderate+. The only known finding is a LOW esbuild
+        # dev-server advisory (transitive via vitest/tsx, never runs in CI);
+        # it clears itself when those parents bump their esbuild range.
+        run: npm audit --audit-level moderate

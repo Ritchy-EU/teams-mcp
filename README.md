@@ -147,7 +147,7 @@ npm run auth
 ## 🔧 Configuration
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20+
 - Microsoft 365 account with appropriate permissions
 - Azure App Registration with Microsoft Graph permissions
 
