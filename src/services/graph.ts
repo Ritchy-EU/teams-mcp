@@ -47,7 +47,9 @@ export function validateGraphToken(token: string): string | undefined {
     ];
     const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (!audiences.some((aud: string) => VALID_GRAPH_AUDIENCES.includes(aud))) {
-      console.error(`Invalid JWT token: Not a valid Microsoft Graph token (aud=${JSON.stringify(payload.aud)})`);
+      console.error(
+        `Invalid JWT token: Not a valid Microsoft Graph token (aud=${JSON.stringify(payload.aud)})`
+      );
       return undefined;
     }
 

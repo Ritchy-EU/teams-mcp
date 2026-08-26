@@ -1,17 +1,17 @@
-import type { Response } from "express";
+import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
+import type {
+  AuthorizationParams,
+  OAuthServerProvider,
+} from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type {
   OAuthClientInformationFull,
   OAuthTokenRevocationRequest,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type {
-  AuthorizationParams,
-  OAuthServerProvider,
-} from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { Response } from "express";
+import { AZURE_CLIENT_SECRET, BASE_URL, CLIENT_ID, TENANT_ID } from "../config.js";
 import { validateGraphToken } from "../services/graph.js";
-import { CLIENT_ID, AZURE_CLIENT_SECRET, TENANT_ID, BASE_URL } from "../config.js";
 
 const TOKEN_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 const AUTHORIZATION_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize`;
@@ -94,8 +94,8 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
       });
       console.log(
         `[OAuth] Stored pending auth flow: state=${params.state.substring(0, 8)}..., ` +
-        `redirectUri=${params.redirectUri}, ` +
-        `pendingFlows=${this.pendingAuthFlows.size}`
+          `redirectUri=${params.redirectUri}, ` +
+          `pendingFlows=${this.pendingAuthFlows.size}`
       );
     }
 
@@ -129,8 +129,8 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
     if (!flow) {
       console.log(
         `[OAuth] handleCallback: state=${state.substring(0, 8)}... NOT FOUND. ` +
-        `pendingFlows=${this.pendingAuthFlows.size}, ` +
-        `knownStates=[${[...this.pendingAuthFlows.keys()].map(s => s.substring(0, 8) + "...").join(", ")}]`
+          `pendingFlows=${this.pendingAuthFlows.size}, ` +
+          `knownStates=[${[...this.pendingAuthFlows.keys()].map((s) => `${s.substring(0, 8)}...`).join(", ")}]`
       );
       return undefined;
     }
@@ -139,7 +139,7 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
     if (Date.now() - flow.createdAt > PENDING_AUTH_TTL_MS) {
       console.log(
         `[OAuth] handleCallback: state=${state.substring(0, 8)}... EXPIRED ` +
-        `(age=${Math.round((Date.now() - flow.createdAt) / 1000)}s)`
+          `(age=${Math.round((Date.now() - flow.createdAt) / 1000)}s)`
       );
       this.pendingAuthFlows.delete(state);
       return undefined;
@@ -167,7 +167,7 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
   ): Promise<OAuthTokens> {
     console.log(
       `[OAuth] Exchanging authorization code (length=${authorizationCode.length}, ` +
-      `hasVerifier=${!!codeVerifier}, redirectUri=${OUR_CALLBACK_URL})`
+        `hasVerifier=${!!codeVerifier}, redirectUri=${OUR_CALLBACK_URL})`
     );
 
     const params = new URLSearchParams({
@@ -199,11 +199,10 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
 
     const data = await response.json();
     console.log(
-      `[OAuth] Token exchange successful: ` +
-      `hasAccessToken=${!!data.access_token}, ` +
-      `hasRefreshToken=${!!data.refresh_token}, ` +
-      `expiresIn=${data.expires_in}s, ` +
-      `scope=${data.scope}`
+      `[OAuth] Token exchange successful: hasAccessToken=${!!data.access_token}, ` +
+        `hasRefreshToken=${!!data.refresh_token}, ` +
+        `expiresIn=${data.expires_in}s, ` +
+        `scope=${data.scope}`
     );
     return {
       access_token: data.access_token,
@@ -265,7 +264,7 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
     const payload = JSON.parse(atob(token.split(".")[1]));
     console.log(
       `[OAuth] Token verified: clientId=${payload.appid || payload.azp || "unknown"}, ` +
-      `exp=${payload.exp ? new Date(payload.exp * 1000).toISOString() : "none"}`
+        `exp=${payload.exp ? new Date(payload.exp * 1000).toISOString() : "none"}`
     );
 
     return {

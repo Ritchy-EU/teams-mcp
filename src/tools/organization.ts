@@ -23,7 +23,10 @@ export function registerOrganizationTools(server: McpServer, graphService: IGrap
     "get_user_manager",
     "Get the manager of a user. Returns the user's direct manager with their profile information. If no userId is provided, returns the current user's manager.",
     {
-      userId: z.string().optional().describe("User ID or email address. If omitted, uses the current authenticated user."),
+      userId: z
+        .string()
+        .optional()
+        .describe("User ID or email address. If omitted, uses the current authenticated user."),
     },
     async ({ userId }) => {
       try {
@@ -69,7 +72,10 @@ export function registerOrganizationTools(server: McpServer, graphService: IGrap
     "get_direct_reports",
     "Get the direct reports of a user. Returns a list of users who report directly to the specified user. If no userId is provided, returns the current user's direct reports.",
     {
-      userId: z.string().optional().describe("User ID or email address. If omitted, uses the current authenticated user."),
+      userId: z
+        .string()
+        .optional()
+        .describe("User ID or email address. If omitted, uses the current authenticated user."),
     },
     async ({ userId }) => {
       try {
@@ -90,8 +96,8 @@ export function registerOrganizationTools(server: McpServer, graphService: IGrap
           };
         }
 
-        const reportsList: UserSummary[] = directReports.map(
-          (report: DirectoryObject) => toUserSummary(report)
+        const reportsList: UserSummary[] = directReports.map((report: DirectoryObject) =>
+          toUserSummary(report)
         );
 
         return {
@@ -121,8 +127,16 @@ export function registerOrganizationTools(server: McpServer, graphService: IGrap
     "get_manager_chain",
     "Get the full chain of managers for a user, from their direct manager up to the top of the organization. Useful for understanding the reporting hierarchy.",
     {
-      userId: z.string().optional().describe("User ID or email address. If omitted, uses the current authenticated user."),
-      maxLevels: z.number().min(1).max(10).optional().describe("Maximum number of levels to traverse up the hierarchy (default: 5, max: 10)."),
+      userId: z
+        .string()
+        .optional()
+        .describe("User ID or email address. If omitted, uses the current authenticated user."),
+      maxLevels: z
+        .number()
+        .min(1)
+        .max(10)
+        .optional()
+        .describe("Maximum number of levels to traverse up the hierarchy (default: 5, max: 10)."),
     },
     async ({ userId, maxLevels }) => {
       try {

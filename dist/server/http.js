@@ -1,20 +1,20 @@
 import { randomUUID } from "node:crypto";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { BASE_URL, DELEGATED_SCOPES, PORT } from "../config.js";
 import { SessionGraphService } from "../services/graph.js";
 import { registerAuthTools } from "../tools/auth.js";
 import { registerChatTools } from "../tools/chats.js";
+import { registerOrganizationTools } from "../tools/organization.js";
 import { registerSearchTools } from "../tools/search.js";
 import { registerTeamsTools } from "../tools/teams.js";
-import { registerOrganizationTools } from "../tools/organization.js";
 import { registerUsersTools } from "../tools/users.js";
 import { MicrosoftEntraOAuthProvider } from "./auth-provider.js";
 import { SessionManager } from "./session-manager.js";
-import { PORT, BASE_URL, DELEGATED_SCOPES } from "../config.js";
 const HTTP_SCOPES = [
     "offline_access", // Enables refresh tokens for long-lived sessions
     ...DELEGATED_SCOPES,
@@ -92,19 +92,30 @@ export async function startHttpServer() {
         const sessionId = req.headers["mcp-session-id"];
         const method = req.body?.method ?? "unknown";
         console.log(`[MCP] POST /mcp method=${method} sessionId=${sessionId ?? "none"}`);
+        // authMiddleware guarantees req.auth; the explicit check narrows the type
+        // and keeps this honest if the middleware setup ever changes.
+        const auth = req.auth;
+        if (!auth) {
+            res.status(401).json({
+                jsonrpc: "2.0",
+                error: { code: -32001, message: "Unauthorized" },
+                id: null,
+            });
+            return;
+        }
         try {
             // Existing session
-            if (sessionId && sessionManager.has(sessionId)) {
-                const session = sessionManager.get(sessionId);
+            const session = sessionId ? sessionManager.get(sessionId) : undefined;
+            if (session) {
                 // Update the session's token from the current request — the MCP client
                 // may have refreshed it since the session was created.
-                session.updateToken(req.auth.token);
+                session.updateToken(auth.token);
                 await session.transport.handleRequest(req, res, req.body);
                 return;
             }
             // New session initialization
             if (!sessionId && isInitializeRequest(req.body)) {
-                let currentToken = req.auth.token;
+                let currentToken = auth.token;
                 console.log(`[MCP] New session initialization, token length=${currentToken.length}`);
                 const { server: mcpServer, graphService } = createSessionServer(async () => currentToken);
                 const transport = new StreamableHTTPServerTransport({
@@ -155,22 +166,22 @@ export async function startHttpServer() {
     // GET /mcp — SSE streams
     app.get("/mcp", authMiddleware, async (req, res) => {
         const sessionId = req.headers["mcp-session-id"];
-        if (!sessionId || !sessionManager.has(sessionId)) {
+        const session = sessionId ? sessionManager.get(sessionId) : undefined;
+        if (!session) {
             res.status(400).send("Invalid or missing session ID");
             return;
         }
-        const session = sessionManager.get(sessionId);
         await session.transport.handleRequest(req, res);
     });
     // DELETE /mcp — session termination
     app.delete("/mcp", authMiddleware, async (req, res) => {
         const sessionId = req.headers["mcp-session-id"];
-        if (!sessionId || !sessionManager.has(sessionId)) {
+        const session = sessionId ? sessionManager.get(sessionId) : undefined;
+        if (!session) {
             res.status(400).send("Invalid or missing session ID");
             return;
         }
         try {
-            const session = sessionManager.get(sessionId);
             await session.transport.handleRequest(req, res);
         }
         catch (error) {

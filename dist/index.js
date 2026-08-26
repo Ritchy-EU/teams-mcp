@@ -10,9 +10,9 @@ import { cachePlugin } from "./msal-cache.js";
 import { GraphService } from "./services/graph.js";
 import { registerAuthTools } from "./tools/auth.js";
 import { registerChatTools } from "./tools/chats.js";
+import { registerOrganizationTools } from "./tools/organization.js";
 import { registerSearchTools } from "./tools/search.js";
 import { registerTeamsTools } from "./tools/teams.js";
-import { registerOrganizationTools } from "./tools/organization.js";
 import { registerUsersTools } from "./tools/users.js";
 const AUTH_INFO_PATH = join(homedir(), ".msgraph-mcp-auth.json");
 // Authentication functions

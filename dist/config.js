@@ -37,7 +37,7 @@ export const DELEGATED_SCOPES = [
     "Files.Read.All",
 ];
 // HTTP server configuration (used in `serve` mode)
-export const PORT = parseInt(process.env.PORT || "3000", 10);
+export const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 export const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 export const AZURE_CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 //# sourceMappingURL=config.js.map

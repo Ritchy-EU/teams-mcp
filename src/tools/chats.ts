@@ -871,7 +871,10 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
             } else {
               // Download file reference via Shares API
               // Encode the SharePoint URL as base64url with "u!" prefix
-              const encodedUrl = `u!${Buffer.from(item.contentUrl!)
+              if (!item.contentUrl) {
+                throw new Error("Attachment has no download URL (contentUrl missing)");
+              }
+              const encodedUrl = `u!${Buffer.from(item.contentUrl)
                 .toString("base64")
                 .replace(/\+/g, "-")
                 .replace(/\//g, "_")

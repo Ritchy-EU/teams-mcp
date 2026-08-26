@@ -15,9 +15,9 @@ import { cachePlugin } from "./msal-cache.js";
 import { GraphService } from "./services/graph.js";
 import { registerAuthTools } from "./tools/auth.js";
 import { registerChatTools } from "./tools/chats.js";
+import { registerOrganizationTools } from "./tools/organization.js";
 import { registerSearchTools } from "./tools/search.js";
 import { registerTeamsTools } from "./tools/teams.js";
-import { registerOrganizationTools } from "./tools/organization.js";
 import { registerUsersTools } from "./tools/users.js";
 
 const AUTH_INFO_PATH = join(homedir(), ".msgraph-mcp-auth.json");
@@ -199,8 +199,12 @@ async function main() {
       console.log("  npx -y github:Ritchy-EU/teams-mcp authenticate # Authenticate with Microsoft");
       console.log("  npx -y github:Ritchy-EU/teams-mcp check        # Check authentication status");
       console.log("  npx -y github:Ritchy-EU/teams-mcp logout       # Clear authentication");
-      console.log("  npx -y github:Ritchy-EU/teams-mcp serve        # Start multi-user HTTP server");
-      console.log("  npx -y github:Ritchy-EU/teams-mcp              # Start MCP server (default, stdio)");
+      console.log(
+        "  npx -y github:Ritchy-EU/teams-mcp serve        # Start multi-user HTTP server"
+      );
+      console.log(
+        "  npx -y github:Ritchy-EU/teams-mcp              # Start MCP server (default, stdio)"
+      );
       return;
     case undefined:
       // No command = start MCP server

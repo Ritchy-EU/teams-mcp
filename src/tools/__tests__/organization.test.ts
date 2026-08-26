@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockMcpServer, mockUser } from "../../test-utils/setup.js";
+import { createMockMcpServer } from "../../test-utils/setup.js";
 import { registerOrganizationTools } from "../organization.js";
 
 const mockManager = {

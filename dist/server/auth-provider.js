@@ -1,5 +1,5 @@
+import { AZURE_CLIENT_SECRET, BASE_URL, CLIENT_ID, TENANT_ID } from "../config.js";
 import { validateGraphToken } from "../services/graph.js";
-import { CLIENT_ID, AZURE_CLIENT_SECRET, TENANT_ID, BASE_URL } from "../config.js";
 const TOKEN_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 const AUTHORIZATION_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize`;
 /** Our server's callback URL registered in Azure AD */
@@ -91,7 +91,7 @@ export class MicrosoftEntraOAuthProvider {
         if (!flow) {
             console.log(`[OAuth] handleCallback: state=${state.substring(0, 8)}... NOT FOUND. ` +
                 `pendingFlows=${this.pendingAuthFlows.size}, ` +
-                `knownStates=[${[...this.pendingAuthFlows.keys()].map(s => s.substring(0, 8) + "...").join(", ")}]`);
+                `knownStates=[${[...this.pendingAuthFlows.keys()].map((s) => `${s.substring(0, 8)}...`).join(", ")}]`);
             return undefined;
         }
         // Check TTL
@@ -135,8 +135,7 @@ export class MicrosoftEntraOAuthProvider {
             throw new Error(`Token exchange failed (${response.status}): ${errorBody}`);
         }
         const data = await response.json();
-        console.log(`[OAuth] Token exchange successful: ` +
-            `hasAccessToken=${!!data.access_token}, ` +
+        console.log(`[OAuth] Token exchange successful: hasAccessToken=${!!data.access_token}, ` +
             `hasRefreshToken=${!!data.refresh_token}, ` +
             `expiresIn=${data.expires_in}s, ` +
             `scope=${data.scope}`);
