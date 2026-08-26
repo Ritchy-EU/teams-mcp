@@ -443,7 +443,9 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
           } as ConversationMember,
         ];
 
-        // Add other users as members
+        // Add other users as members.
+        // Graph only accepts the "owner" role when creating a chat — "member"
+        // is rejected with "The passed-in role 'member' is not supported".
         for (const email of userEmails) {
           const user = (await client.api(`/users/${email}`).get()) as User;
           members.push({
@@ -451,7 +453,7 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
             user: {
               id: user?.id,
             },
-            roles: ["member"],
+            roles: ["owner"],
           } as ConversationMember);
         }
 

@@ -1007,7 +1007,7 @@ describe("Chat Tools", () => {
           {
             "@odata.type": "#microsoft.graph.aadUserConversationMember",
             user: { id: "otheruser456" },
-            roles: ["member"],
+            roles: ["owner"],
           },
         ],
       });
@@ -1048,12 +1048,12 @@ describe("Chat Tools", () => {
           {
             "@odata.type": "#microsoft.graph.aadUserConversationMember",
             user: { id: "user1" },
-            roles: ["member"],
+            roles: ["owner"],
           },
           {
             "@odata.type": "#microsoft.graph.aadUserConversationMember",
             user: { id: "user2" },
-            roles: ["member"],
+            roles: ["owner"],
           },
         ],
       });
