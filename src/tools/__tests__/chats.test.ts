@@ -2,7 +2,17 @@ import type { Client } from "@microsoft/microsoft-graph-client";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphService } from "../../services/graph.js";
+import type { FileUploadResult } from "../../utils/file-upload.js";
 import { registerChatTools } from "../chats.js";
+
+// Mock file-upload module
+vi.mock("../../utils/file-upload.js", async () => {
+  const actual = (await vi.importActual("../../utils/file-upload.js")) as any;
+  return {
+    ...actual,
+    uploadFileToChat: vi.fn(),
+  };
+});
 
 // Mock the Graph service
 const mockGraphService = {
@@ -27,9 +37,9 @@ describe("Chat Tools", () => {
 
   describe("registerChatTools", () => {
     it("should register all chat tools", () => {
-      registerChatTools(mockServer, mockGraphService);
+      registerChatTools(mockServer, mockGraphService, false);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(8);
+      expect(mockServer.tool).toHaveBeenCalledTimes(11);
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chats",
         expect.any(String),
@@ -68,6 +78,48 @@ describe("Chat Tools", () => {
       );
       expect(mockServer.tool).toHaveBeenCalledWith(
         "delete_chat_message",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "download_chat_attachment",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "set_chat_message_reaction",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "unset_chat_message_reaction",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "send_file_to_chat",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+    });
+
+    it("should register only read-only chat tools when readOnly is true", () => {
+      registerChatTools(mockServer, mockGraphService, true);
+
+      expect(mockServer.tool).toHaveBeenCalledTimes(3);
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "list_chats",
+        expect.any(String),
+        {},
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "get_chat_messages",
         expect.any(String),
         expect.any(Object),
         expect.any(Function)
@@ -1261,6 +1313,347 @@ describe("Chat Tools", () => {
       expect(result.content[0].text).toBe(
         "❌ Failed to rename chat: Cannot update topic for oneOnOne chat"
       );
+    });
+  });
+
+  describe("get_chat_messages reactions", () => {
+    let getChatMessagesHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "get_chat_messages");
+      getChatMessagesHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should include reactions in message summaries", async () => {
+      const mockMessages = [
+        {
+          id: "msg1",
+          body: { content: "Hello world" },
+          from: { user: { displayName: "John Doe" } },
+          createdDateTime: "2023-01-01T10:00:00Z",
+          reactions: [
+            {
+              reactionType: "like",
+              displayName: "Like",
+              createdDateTime: "2023-01-01T10:01:00Z",
+            },
+            {
+              reactionType: "heart",
+              displayName: "Heart",
+              createdDateTime: "2023-01-01T10:02:00Z",
+            },
+          ],
+        },
+      ];
+
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValue({ value: mockMessages }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await getChatMessagesHandler({ chatId: "chat123" });
+      const parsedResponse = JSON.parse(result.content[0].text);
+
+      expect(parsedResponse.messages[0].reactions).toHaveLength(2);
+      expect(parsedResponse.messages[0].reactions[0]).toEqual({
+        reactionType: "like",
+        displayName: "Like",
+        createdDateTime: "2023-01-01T10:01:00Z",
+      });
+      expect(parsedResponse.messages[0].reactions[1]).toEqual({
+        reactionType: "heart",
+        displayName: "Heart",
+        createdDateTime: "2023-01-01T10:02:00Z",
+      });
+    });
+
+    it("should handle messages without reactions", async () => {
+      const mockMessages = [
+        {
+          id: "msg1",
+          body: { content: "No reactions" },
+          from: { user: { displayName: "John" } },
+          createdDateTime: "2023-01-01T10:00:00Z",
+        },
+      ];
+
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValue({ value: mockMessages }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await getChatMessagesHandler({ chatId: "chat123" });
+      const parsedResponse = JSON.parse(result.content[0].text);
+
+      expect(parsedResponse.messages[0].reactions).toBeUndefined();
+    });
+  });
+
+  describe("set_chat_message_reaction", () => {
+    let setReactionHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "set_chat_message_reaction");
+      setReactionHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should set a reaction on a chat message", async () => {
+      const mockApiChain = {
+        post: vi.fn().mockResolvedValue(undefined),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await setReactionHandler({
+        chatId: "chat123",
+        messageId: "msg456",
+        reactionType: "like",
+      });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/chat123/messages/msg456/setReaction");
+      expect(mockApiChain.post).toHaveBeenCalledWith({ reactionType: "like" });
+      expect(result.content[0].text).toBe("✅ Reaction like added to message msg456.");
+    });
+
+    it("should set a unicode emoji reaction", async () => {
+      const mockApiChain = {
+        post: vi.fn().mockResolvedValue(undefined),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await setReactionHandler({
+        chatId: "chat123",
+        messageId: "msg456",
+        reactionType: "👍",
+      });
+
+      expect(mockApiChain.post).toHaveBeenCalledWith({ reactionType: "👍" });
+      expect(result.content[0].text).toContain("👍");
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = {
+        post: vi.fn().mockRejectedValue(new Error("Forbidden")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await setReactionHandler({
+        chatId: "chat123",
+        messageId: "msg456",
+        reactionType: "like",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to set reaction: Forbidden");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("unset_chat_message_reaction", () => {
+    let unsetReactionHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "unset_chat_message_reaction");
+      unsetReactionHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should unset a reaction on a chat message", async () => {
+      const mockApiChain = {
+        post: vi.fn().mockResolvedValue(undefined),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await unsetReactionHandler({
+        chatId: "chat123",
+        messageId: "msg456",
+        reactionType: "like",
+      });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/chat123/messages/msg456/unsetReaction");
+      expect(mockApiChain.post).toHaveBeenCalledWith({ reactionType: "like" });
+      expect(result.content[0].text).toBe("✅ Reaction like removed from message msg456.");
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = {
+        post: vi.fn().mockRejectedValue(new Error("Not found")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await unsetReactionHandler({
+        chatId: "chat123",
+        messageId: "msg456",
+        reactionType: "like",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to unset reaction: Not found");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("send_file_to_chat", () => {
+    let sendFileToChatHandler: (args?: any) => Promise<any>;
+
+    beforeEach(async () => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "send_file_to_chat");
+      sendFileToChatHandler = call?.[3] as unknown as (args: any) => Promise<any>;
+    });
+
+    it("should upload file and send message successfully", async () => {
+      const { uploadFileToChat } = await import("../../utils/file-upload.js");
+
+      const mockUploadResult: FileUploadResult = {
+        webUrl: "https://onedrive.com/file.pdf",
+        attachmentId: "AAAA-BBBB-CCCC",
+        fileName: "report.pdf",
+        fileSize: 2048,
+        mimeType: "application/pdf",
+      };
+      vi.mocked(uploadFileToChat).mockResolvedValue(mockUploadResult);
+
+      const mockApiChain = {
+        post: vi.fn().mockResolvedValue({ id: "filemsg123" }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await sendFileToChatHandler({
+        chatId: "chat123",
+        filePath: "/tmp/report.pdf",
+      });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
+      expect(result.content[0].text).toContain("report.pdf");
+      expect(result.content[0].text).toContain("Message ID: filemsg123");
+
+      // Verify message payload has HTML body with attachment tag
+      expect(mockApiChain.post).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            content: expect.stringContaining('<attachment id="AAAA-BBBB-CCCC"></attachment>'),
+            contentType: "html",
+          }),
+          attachments: [
+            {
+              id: "AAAA-BBBB-CCCC",
+              contentType: "reference",
+              contentUrl: "https://onedrive.com/file.pdf",
+              name: "report.pdf",
+            },
+          ],
+        })
+      );
+    });
+
+    it("should include optional message text with HTML escaping", async () => {
+      const { uploadFileToChat } = await import("../../utils/file-upload.js");
+
+      const mockUploadResult: FileUploadResult = {
+        webUrl: "https://onedrive.com/file.pdf",
+        attachmentId: "AAAA-BBBB-CCCC",
+        fileName: "report.pdf",
+        fileSize: 1024,
+        mimeType: "application/pdf",
+      };
+      vi.mocked(uploadFileToChat).mockResolvedValue(mockUploadResult);
+
+      const mockApiChain = {
+        post: vi.fn().mockResolvedValue({ id: "filemsg456" }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await sendFileToChatHandler({
+        chatId: "chat123",
+        filePath: "/tmp/report.pdf",
+        message: "Check <this> file & report",
+      });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
+
+      // Plain text should be HTML-escaped in the body
+      const postPayload = mockApiChain.post.mock.calls[0][0];
+      expect(postPayload.body.content).toContain("Check &lt;this&gt; file &amp; report");
+      expect(postPayload.body.content).toContain('<attachment id="AAAA-BBBB-CCCC"></attachment>');
+    });
+
+    it("should handle markdown format for message", async () => {
+      const { uploadFileToChat } = await import("../../utils/file-upload.js");
+
+      const mockUploadResult: FileUploadResult = {
+        webUrl: "https://onedrive.com/file.pdf",
+        attachmentId: "AAAA-BBBB-CCCC",
+        fileName: "report.pdf",
+        fileSize: 1024,
+        mimeType: "application/pdf",
+      };
+      vi.mocked(uploadFileToChat).mockResolvedValue(mockUploadResult);
+
+      const mockApiChain = {
+        post: vi.fn().mockResolvedValue({ id: "filemsg789" }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await sendFileToChatHandler({
+        chatId: "chat123",
+        filePath: "/tmp/report.pdf",
+        message: "**Bold** report",
+        format: "markdown",
+      });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
+
+      const postPayload = mockApiChain.post.mock.calls[0][0];
+      expect(postPayload.body.content).toContain("<strong>Bold</strong>");
+      expect(postPayload.body.contentType).toBe("html");
+    });
+
+    it("should handle upload errors", async () => {
+      const { uploadFileToChat } = await import("../../utils/file-upload.js");
+
+      vi.mocked(uploadFileToChat).mockRejectedValue(new Error("File not found"));
+
+      const result = await sendFileToChatHandler({
+        chatId: "chat123",
+        filePath: "/tmp/nonexistent.pdf",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to send file: File not found");
+      expect(result.isError).toBe(true);
+    });
+
+    it("should handle message send errors after successful upload", async () => {
+      const { uploadFileToChat } = await import("../../utils/file-upload.js");
+
+      const mockUploadResult: FileUploadResult = {
+        webUrl: "https://onedrive.com/file.pdf",
+        attachmentId: "AAAA-BBBB-CCCC",
+        fileName: "report.pdf",
+        fileSize: 1024,
+        mimeType: "application/pdf",
+      };
+      vi.mocked(uploadFileToChat).mockResolvedValue(mockUploadResult);
+
+      const mockApiChain = {
+        post: vi.fn().mockRejectedValue(new Error("Permission denied")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await sendFileToChatHandler({
+        chatId: "chat123",
+        filePath: "/tmp/report.pdf",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to send file: Permission denied");
+      expect(result.isError).toBe(true);
     });
   });
 });

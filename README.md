@@ -164,7 +164,15 @@ npm run auth
 - `Mail.Read` - Required for Microsoft Search API
 - `Calendars.Read` - Required for Microsoft Search API
 - `Files.Read.All` - Required for Microsoft Search API
+- `Files.ReadWrite.All` - Upload files to chats and channels
 - `Sites.Read.All` - Required for Microsoft Search API
+
+### Read-only mode
+
+Set `TEAMS_MCP_READ_ONLY=true` (or `1`/`yes`) to run the server in read-only mode:
+write tools (send, create, update, delete, reactions, file upload) are not
+registered, and only the reduced read-only permission scopes are requested
+during authentication.
 
 ## 🛠️ Usage
 
@@ -196,6 +204,8 @@ npm run build && node dist/index.js
 - `update_channel_message` - Edit a previously sent channel message
 - `delete_channel_message` - Soft delete a channel message (supports replies)
 - `list_team_members` - List members of a specific team
+- `send_file_to_channel` - Upload a local file and send it as a channel message (or thread reply)
+- `set_channel_message_reaction` / `unset_channel_message_reaction` - Add or remove reactions
 
 #### Chat Operations
 - `list_chats` - List user's chats (1:1 and group)
@@ -205,9 +215,12 @@ npm run build && node dist/index.js
 - `rename_chat` - Rename a group chat (change its topic)
 - `update_chat_message` - Edit a previously sent chat message
 - `delete_chat_message` - Soft delete a chat message
+- `send_file_to_chat` - Upload a local file and send it as a chat message
+- `set_chat_message_reaction` / `unset_chat_message_reaction` - Add or remove reactions
 
 #### Media Operations
 - `download_message_hosted_content` - Download hosted content (images, files) from messages
+- `download_chat_attachment` - Download files and inline images from chat messages
 
 #### Search Operations
 - `search_messages` - Search across all Teams messages using KQL syntax

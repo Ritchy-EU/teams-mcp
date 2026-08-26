@@ -28,6 +28,8 @@ beforeEach(() => {
 // Simple integration tests for basic functionality
 describe("MCP Server Integration", () => {
   describe("CLI Commands", () => {
+    // Importing index.js pulls the full dependency graph (express, jsdom, msal),
+    // which can take >20s under parallel suite load — hence the explicit timeout.
     it("should handle help command", async () => {
       process.argv = ["node", "index.js", "--help"];
 
@@ -37,7 +39,7 @@ describe("MCP Server Integration", () => {
       expect(mockConsoleLog).toHaveBeenCalledWith("Microsoft Graph MCP Server");
       expect(mockConsoleLog).toHaveBeenCalledWith("Usage:");
       expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining("authenticate"));
-    });
+    }, 60_000);
 
     it.skip("should handle help variants", async () => {
       // Skipping complex integration test - core functionality is tested in unit tests

@@ -29,7 +29,9 @@ export const AUTHORITY = `https://login.microsoftonline.com/${tenantId}`;
 
 // Scopes for delegated (user) authentication.
 // All modes (stdio, HTTP) share this base set of scopes.
-export const DELEGATED_SCOPES = [
+
+/** Scopes sufficient for read-only operations (no sending, no uploads). */
+export const READ_ONLY_SCOPES = [
   "User.Read",
   "User.ReadBasic.All",
   "User.Read.All",
@@ -37,10 +39,28 @@ export const DELEGATED_SCOPES = [
   "Channel.ReadBasic.All",
   "ChannelMessage.Read.All",
   "TeamMember.Read.All",
-  "Chat.ReadBasic",
-  "Chat.ReadWrite",
+  "Chat.Read",
   "Files.Read.All",
 ];
+
+/** Full scopes including write operations. */
+export const FULL_SCOPES = [
+  ...READ_ONLY_SCOPES,
+  "ChannelMessage.Send",
+  "ChannelMessage.ReadWrite",
+  "Chat.ReadWrite",
+  "Files.ReadWrite.All",
+];
+
+/**
+ * Read-only mode: set TEAMS_MCP_READ_ONLY=true (or 1/yes) to skip registering
+ * write tools and request only the reduced permission scopes.
+ */
+export const READ_ONLY = ["1", "true", "yes"].includes(
+  (process.env.TEAMS_MCP_READ_ONLY ?? "").toLowerCase()
+);
+
+export const DELEGATED_SCOPES = READ_ONLY ? READ_ONLY_SCOPES : FULL_SCOPES;
 
 // HTTP server configuration (used in `serve` mode)
 export const PORT = Number.parseInt(process.env.PORT || "3000", 10);

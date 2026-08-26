@@ -10,5 +10,5 @@ import type { IGraphService } from "../services/graph.js";
  * @param server - The MCP server instance to register tools on.
  * @param graphService - The Microsoft Graph service used for API calls.
  */
-export declare function registerTeamsTools(server: McpServer, graphService: IGraphService): void;
+export declare function registerTeamsTools(server: McpServer, graphService: IGraphService, readOnly: boolean): void;
 //# sourceMappingURL=teams.d.ts.map

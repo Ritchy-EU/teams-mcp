@@ -2,16 +2,24 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { IGraphService } from "../services/graph.js";
 import type {
-  AttachmentSummary,
   Chat,
   ChatMessage,
+  ChatMessageReaction,
   ChatSummary,
   ConversationMember,
   CreateChatPayload,
   GraphApiResponse,
   MessageSummary,
+  ReactionSummary,
   User,
 } from "../types/graph.js";
+import { extractAttachmentSummaries } from "../utils/attachments.js";
+import {
+  buildFileAttachment,
+  escapeHtml,
+  formatFileSize,
+  uploadFileToChat,
+} from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml } from "../utils/users.js";
 
@@ -23,7 +31,11 @@ import { processMentionsInHtml } from "../utils/users.js";
  * @param server - The MCP server instance to register tools on.
  * @param graphService - The Microsoft Graph service used for API calls.
  */
-export function registerChatTools(server: McpServer, graphService: IGraphService) {
+export function registerChatTools(
+  server: McpServer,
+  graphService: IGraphService,
+  readOnly: boolean
+) {
   // List user's chats
   server.tool(
     "list_chats",
@@ -241,13 +253,15 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
           };
 
           // Include attachment metadata if present
-          if (message.attachments && message.attachments.length > 0) {
-            summary.attachments = message.attachments.map(
-              (att): AttachmentSummary => ({
-                id: att.id,
-                name: att.name,
-                contentType: att.contentType,
-                contentUrl: att.contentUrl,
+          summary.attachments = extractAttachmentSummaries(message.attachments);
+
+          // Include reactions if present
+          if (message.reactions?.length) {
+            summary.reactions = message.reactions.map(
+              (r: ChatMessageReaction): ReactionSummary => ({
+                reactionType: r.reactionType,
+                displayName: r.displayName,
+                createdDateTime: r.createdDateTime,
               })
             );
           }
@@ -289,6 +303,250 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
       }
     }
   );
+
+  // Download attachments and hosted content from chat messages
+  server.tool(
+    "download_chat_attachment",
+    "Download files and images from a chat message. Handles both inline images (hosted content) and file attachments (OneDrive/SharePoint references). Use get_chat_messages first to see available attachments.",
+    {
+      chatId: z.string().describe("Chat ID"),
+      messageId: z.string().describe("Message ID containing the attachment"),
+      attachmentIndex: z
+        .number()
+        .min(0)
+        .optional()
+        .describe(
+          "Index of a specific attachment to download (0-based). If not provided, downloads all attachments."
+        ),
+      savePath: z
+        .string()
+        .optional()
+        .describe(
+          "Optional file path to save the content. Supports UNC paths (e.g., \\\\wsl.localhost\\Ubuntu\\tmp\\file.png)."
+        ),
+    },
+    async ({ chatId, messageId, attachmentIndex, savePath }) => {
+      try {
+        const client = await graphService.getClient();
+
+        // Fetch the message to inspect attachments and body
+        const message = (await client
+          .api(`/me/chats/${chatId}/messages/${messageId}`)
+          .get()) as ChatMessage;
+
+        if (!message) {
+          return {
+            content: [{ type: "text", text: "❌ Message not found." }],
+            isError: true,
+          };
+        }
+
+        // Collect downloadable items
+        interface DownloadItem {
+          type: "hostedContent" | "fileReference";
+          id: string;
+          name: string;
+          contentUrl?: string | null;
+        }
+
+        const items: DownloadItem[] = [];
+
+        // 1. Extract hosted content IDs from message body HTML (inline images)
+        const bodyContent = message.body?.content || "";
+        const hostedContentRegex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value|itemid="([^"]+)"/gi;
+        let match: RegExpExecArray | null;
+
+        // biome-ignore lint/suspicious/noAssignInExpressions: needed for regex extraction
+        while ((match = hostedContentRegex.exec(bodyContent)) !== null) {
+          const contentId = match[1] || match[2];
+          if (contentId && !items.some((i) => i.id === contentId)) {
+            items.push({
+              type: "hostedContent",
+              id: contentId,
+              name: `hosted_image_${items.length}.png`,
+            });
+          }
+        }
+
+        // 2. Collect file reference attachments
+        if (message.attachments) {
+          for (const att of message.attachments) {
+            if (att.contentType === "reference" && att.contentUrl) {
+              items.push({
+                type: "fileReference",
+                id: att.id || `ref_${items.length}`,
+                name: att.name || "unknown_file",
+                contentUrl: att.contentUrl,
+              });
+            }
+          }
+        }
+
+        if (items.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ No downloadable attachments found in this message.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Filter to specific attachment if index provided
+        const targetItems =
+          attachmentIndex !== undefined ? [items[attachmentIndex]].filter(Boolean) : items;
+
+        if (targetItems.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Attachment index ${attachmentIndex} out of range. Message has ${items.length} attachment(s).`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Download each item
+        const results: Array<{
+          index: number;
+          type: string;
+          name: string;
+          size: number;
+          base64Data?: string;
+          savedTo?: string;
+          error?: string;
+        }> = [];
+
+        for (const item of targetItems) {
+          const itemIndex = items.indexOf(item);
+          try {
+            let buffer: Buffer;
+
+            if (item.type === "hostedContent") {
+              // Download hosted content (inline images)
+              const response = await client
+                .api(`/chats/${chatId}/messages/${messageId}/hostedContents/${item.id}/$value`)
+                .responseType("arraybuffer" as any)
+                .get();
+              buffer = Buffer.from(response as ArrayBuffer);
+            } else {
+              // Download file reference via Shares API
+              // Encode the SharePoint URL as base64url with "u!" prefix
+              if (!item.contentUrl) {
+                throw new Error("Attachment has no download URL (contentUrl missing)");
+              }
+              const encodedUrl = `u!${Buffer.from(item.contentUrl)
+                .toString("base64")
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=+$/, "")}`;
+
+              const response = await client
+                .api(`/shares/${encodedUrl}/driveItem/content`)
+                .responseType("arraybuffer" as any)
+                .get();
+              buffer = Buffer.from(response as ArrayBuffer);
+            }
+
+            const result: {
+              index: number;
+              type: string;
+              name: string;
+              size: number;
+              base64Data?: string;
+              savedTo?: string;
+            } = {
+              index: itemIndex,
+              type: item.type,
+              name: item.name,
+              size: buffer.length,
+            };
+
+            // Save to disk or return base64
+            if (savePath) {
+              const fs = await import("node:fs/promises");
+              const path = await import("node:path");
+
+              const normalizedPath = savePath.replace(/\\\\/g, "\\");
+              const isUncPath =
+                normalizedPath.startsWith("\\\\") || normalizedPath.startsWith("//");
+
+              let finalPath = normalizedPath;
+              if (targetItems.length > 1) {
+                const ext = path.extname(normalizedPath);
+                const base = ext ? normalizedPath.slice(0, -ext.length) : normalizedPath;
+                finalPath = `${base}_${itemIndex}${ext || path.extname(item.name)}`;
+              }
+
+              const targetPath = isUncPath ? finalPath : path.resolve(finalPath);
+              await fs.writeFile(targetPath, buffer);
+              result.savedTo = targetPath;
+            } else {
+              result.base64Data = buffer.toString("base64");
+            }
+
+            results.push(result);
+          } catch (downloadError) {
+            const errorMsg =
+              downloadError instanceof Error ? downloadError.message : "Unknown error";
+            results.push({
+              index: itemIndex,
+              type: item.type,
+              name: item.name,
+              size: 0,
+              error: errorMsg,
+            });
+          }
+        }
+
+        const successCount = results.filter((r) => !r.error).length;
+        const errorCount = results.filter((r) => r.error).length;
+
+        let summary = `📥 Downloaded ${successCount} of ${targetItems.length} attachment(s)`;
+        if (errorCount > 0) {
+          summary += ` (${errorCount} failed)`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  summary,
+                  messageId,
+                  totalAttachments: items.length,
+                  downloaded: targetItems.length,
+                  successCount,
+                  errorCount,
+                  attachments: results,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Error: ${errorMessage}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Write tools below are skipped when the server runs in read-only mode.
+  if (readOnly) return;
 
   // Send chat message
   server.tool(
@@ -739,230 +997,32 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
     }
   );
 
-  // Download attachments and hosted content from chat messages
+  // Set a reaction on a chat message
   server.tool(
-    "download_chat_attachment",
-    "Download files and images from a chat message. Handles both inline images (hosted content) and file attachments (OneDrive/SharePoint references). Use get_chat_messages first to see available attachments.",
+    "set_chat_message_reaction",
+    "Add a reaction to a message in a chat conversation. Supports Unicode emoji characters and named reactions (like, angry, sad, laugh, heart, surprised).",
     {
       chatId: z.string().describe("Chat ID"),
-      messageId: z.string().describe("Message ID containing the attachment"),
-      attachmentIndex: z
-        .number()
-        .min(0)
-        .optional()
-        .describe(
-          "Index of a specific attachment to download (0-based). If not provided, downloads all attachments."
-        ),
-      savePath: z
+      messageId: z.string().describe("Message ID to react to"),
+      reactionType: z
         .string()
-        .optional()
         .describe(
-          "Optional file path to save the content. Supports UNC paths (e.g., \\\\wsl.localhost\\Ubuntu\\tmp\\file.png)."
+          'Reaction type - Unicode emoji (e.g., "👍") or named reaction (e.g., "like", "heart")'
         ),
     },
-    async ({ chatId, messageId, attachmentIndex, savePath }) => {
+    async ({ chatId, messageId, reactionType }) => {
       try {
         const client = await graphService.getClient();
 
-        // Fetch the message to inspect attachments and body
-        const message = (await client
-          .api(`/me/chats/${chatId}/messages/${messageId}`)
-          .get()) as ChatMessage;
-
-        if (!message) {
-          return {
-            content: [{ type: "text", text: "❌ Message not found." }],
-            isError: true,
-          };
-        }
-
-        // Collect downloadable items
-        interface DownloadItem {
-          type: "hostedContent" | "fileReference";
-          id: string;
-          name: string;
-          contentUrl?: string | null;
-        }
-
-        const items: DownloadItem[] = [];
-
-        // 1. Extract hosted content IDs from message body HTML (inline images)
-        const bodyContent = message.body?.content || "";
-        const hostedContentRegex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value|itemid="([^"]+)"/gi;
-        let match: RegExpExecArray | null;
-
-        // biome-ignore lint/suspicious/noAssignInExpressions: needed for regex extraction
-        while ((match = hostedContentRegex.exec(bodyContent)) !== null) {
-          const contentId = match[1] || match[2];
-          if (contentId && !items.some((i) => i.id === contentId)) {
-            items.push({
-              type: "hostedContent",
-              id: contentId,
-              name: `hosted_image_${items.length}.png`,
-            });
-          }
-        }
-
-        // 2. Collect file reference attachments
-        if (message.attachments) {
-          for (const att of message.attachments) {
-            if (att.contentType === "reference" && att.contentUrl) {
-              items.push({
-                type: "fileReference",
-                id: att.id || `ref_${items.length}`,
-                name: att.name || "unknown_file",
-                contentUrl: att.contentUrl,
-              });
-            }
-          }
-        }
-
-        if (items.length === 0) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "❌ No downloadable attachments found in this message.",
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        // Filter to specific attachment if index provided
-        const targetItems =
-          attachmentIndex !== undefined ? [items[attachmentIndex]].filter(Boolean) : items;
-
-        if (targetItems.length === 0) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `❌ Attachment index ${attachmentIndex} out of range. Message has ${items.length} attachment(s).`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        // Download each item
-        const results: Array<{
-          index: number;
-          type: string;
-          name: string;
-          size: number;
-          base64Data?: string;
-          savedTo?: string;
-          error?: string;
-        }> = [];
-
-        for (const item of targetItems) {
-          const itemIndex = items.indexOf(item);
-          try {
-            let buffer: Buffer;
-
-            if (item.type === "hostedContent") {
-              // Download hosted content (inline images)
-              const response = await client
-                .api(`/chats/${chatId}/messages/${messageId}/hostedContents/${item.id}/$value`)
-                .responseType("arraybuffer" as any)
-                .get();
-              buffer = Buffer.from(response as ArrayBuffer);
-            } else {
-              // Download file reference via Shares API
-              // Encode the SharePoint URL as base64url with "u!" prefix
-              if (!item.contentUrl) {
-                throw new Error("Attachment has no download URL (contentUrl missing)");
-              }
-              const encodedUrl = `u!${Buffer.from(item.contentUrl)
-                .toString("base64")
-                .replace(/\+/g, "-")
-                .replace(/\//g, "_")
-                .replace(/=+$/, "")}`;
-
-              const response = await client
-                .api(`/shares/${encodedUrl}/driveItem/content`)
-                .responseType("arraybuffer" as any)
-                .get();
-              buffer = Buffer.from(response as ArrayBuffer);
-            }
-
-            const result: {
-              index: number;
-              type: string;
-              name: string;
-              size: number;
-              base64Data?: string;
-              savedTo?: string;
-            } = {
-              index: itemIndex,
-              type: item.type,
-              name: item.name,
-              size: buffer.length,
-            };
-
-            // Save to disk or return base64
-            if (savePath) {
-              const fs = await import("node:fs/promises");
-              const path = await import("node:path");
-
-              const normalizedPath = savePath.replace(/\\\\/g, "\\");
-              const isUncPath =
-                normalizedPath.startsWith("\\\\") || normalizedPath.startsWith("//");
-
-              let finalPath = normalizedPath;
-              if (targetItems.length > 1) {
-                const ext = path.extname(normalizedPath);
-                const base = ext ? normalizedPath.slice(0, -ext.length) : normalizedPath;
-                finalPath = `${base}_${itemIndex}${ext || path.extname(item.name)}`;
-              }
-
-              const targetPath = isUncPath ? finalPath : path.resolve(finalPath);
-              await fs.writeFile(targetPath, buffer);
-              result.savedTo = targetPath;
-            } else {
-              result.base64Data = buffer.toString("base64");
-            }
-
-            results.push(result);
-          } catch (downloadError) {
-            const errorMsg =
-              downloadError instanceof Error ? downloadError.message : "Unknown error";
-            results.push({
-              index: itemIndex,
-              type: item.type,
-              name: item.name,
-              size: 0,
-              error: errorMsg,
-            });
-          }
-        }
-
-        const successCount = results.filter((r) => !r.error).length;
-        const errorCount = results.filter((r) => r.error).length;
-
-        let summary = `📥 Downloaded ${successCount} of ${targetItems.length} attachment(s)`;
-        if (errorCount > 0) {
-          summary += ` (${errorCount} failed)`;
-        }
+        await client
+          .api(`/chats/${chatId}/messages/${messageId}/setReaction`)
+          .post({ reactionType });
 
         return {
           content: [
             {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  summary,
-                  messageId,
-                  totalAttachments: items.length,
-                  downloaded: targetItems.length,
-                  successCount,
-                  errorCount,
-                  attachments: results,
-                },
-                null,
-                2
-              ),
+              type: "text" as const,
+              text: `✅ Reaction ${reactionType} added to message ${messageId}.`,
             },
           ],
         };
@@ -971,10 +1031,123 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
         return {
           content: [
             {
-              type: "text",
-              text: `❌ Error: ${errorMessage}`,
+              type: "text" as const,
+              text: `❌ Failed to set reaction: ${errorMessage}`,
             },
           ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Unset a reaction on a chat message
+  server.tool(
+    "unset_chat_message_reaction",
+    "Remove a reaction from a message in a chat conversation.",
+    {
+      chatId: z.string().describe("Chat ID"),
+      messageId: z.string().describe("Message ID to remove reaction from"),
+      reactionType: z
+        .string()
+        .describe(
+          'Reaction type to remove - Unicode emoji (e.g., "👍") or named reaction (e.g., "like", "heart")'
+        ),
+    },
+    async ({ chatId, messageId, reactionType }) => {
+      try {
+        const client = await graphService.getClient();
+
+        await client
+          .api(`/chats/${chatId}/messages/${messageId}/unsetReaction`)
+          .post({ reactionType });
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `✅ Reaction ${reactionType} removed from message ${messageId}.`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to unset reaction: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Send a file to a chat
+  server.tool(
+    "send_file_to_chat",
+    "Upload a local file and send it as a message to a Teams chat. Supports any file type (PDF, DOCX, ZIP, images, etc.). The file is uploaded to OneDrive and sent as a reference attachment.",
+    {
+      chatId: z.string().describe("Chat ID"),
+      filePath: z.string().describe("Absolute path to the local file to upload"),
+      message: z.string().optional().describe("Optional message text to accompany the file"),
+      fileName: z
+        .string()
+        .optional()
+        .describe("Optional custom filename (defaults to the original file name)"),
+      format: z.enum(["text", "markdown"]).optional().describe("Message format (text or markdown)"),
+      importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
+    },
+    async ({ chatId, filePath, message, fileName, format = "text", importance = "normal" }) => {
+      try {
+        const client = await graphService.getClient();
+
+        const uploadResult = await uploadFileToChat(graphService, filePath, fileName);
+
+        // Build message content — must be HTML with attachment reference tag
+        let content = "";
+        if (message) {
+          if (format === "markdown") {
+            content = await markdownToHtml(message);
+          } else {
+            content = escapeHtml(message);
+          }
+        }
+
+        const attachmentTag = `<attachment id="${uploadResult.attachmentId}"></attachment>`;
+        content = content ? `${content}<br>${attachmentTag}` : attachmentTag;
+
+        const attachments = buildFileAttachment(uploadResult);
+        const messagePayload: any = {
+          body: { content, contentType: "html" },
+          importance,
+          attachments,
+        };
+
+        const result = (await client
+          .api(`/me/chats/${chatId}/messages`)
+          .post(messagePayload)) as ChatMessage;
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `✅ File sent successfully to chat.\nFile: ${uploadResult.fileName} (${formatFileSize(uploadResult.fileSize)})\nMessage ID: ${result.id}`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to send file: ${errorMessage}`,
+            },
+          ],
+          isError: true,
         };
       }
     }

@@ -19,5 +19,5 @@ export declare function formatSearchHits(hits: SearchHit[]): {
     teamId: string | undefined;
     channelId: string | undefined;
 }[];
-export declare function registerSearchTools(server: McpServer, graphService: IGraphService): void;
+export declare function registerSearchTools(server: McpServer, graphService: IGraphService, _readOnly: boolean): void;
 //# sourceMappingURL=search.d.ts.map

@@ -12,7 +12,7 @@ function toUserSummary(obj) {
         department: user.department ?? undefined,
     };
 }
-export function registerOrganizationTools(server, graphService) {
+export function registerOrganizationTools(server, graphService, _readOnly) {
     // Get user's manager
     server.tool("get_user_manager", "Get the manager of a user. Returns the user's direct manager with their profile information. If no userId is provided, returns the current user's manager.", {
         userId: z

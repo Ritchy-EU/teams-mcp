@@ -10,7 +10,11 @@ function escapeODataString(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-export function registerUsersTools(server: McpServer, graphService: IGraphService) {
+export function registerUsersTools(
+  server: McpServer,
+  graphService: IGraphService,
+  _readOnly: boolean
+) {
   // Get current user
   server.tool(
     "get_current_user",

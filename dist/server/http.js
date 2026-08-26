@@ -5,7 +5,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { BASE_URL, DELEGATED_SCOPES, PORT } from "../config.js";
+import { BASE_URL, DELEGATED_SCOPES, PORT, READ_ONLY } from "../config.js";
 import { SessionGraphService } from "../services/graph.js";
 import { registerAuthTools } from "../tools/auth.js";
 import { registerChatTools } from "../tools/chats.js";
@@ -25,12 +25,12 @@ function createSessionServer(tokenAccessor) {
         version: "0.7.0",
     });
     const graphService = new SessionGraphService(tokenAccessor);
-    registerAuthTools(server, graphService);
-    registerUsersTools(server, graphService);
-    registerOrganizationTools(server, graphService);
-    registerTeamsTools(server, graphService);
-    registerChatTools(server, graphService);
-    registerSearchTools(server, graphService);
+    registerAuthTools(server, graphService, READ_ONLY);
+    registerUsersTools(server, graphService, READ_ONLY);
+    registerOrganizationTools(server, graphService, READ_ONLY);
+    registerTeamsTools(server, graphService, READ_ONLY);
+    registerChatTools(server, graphService, READ_ONLY);
+    registerSearchTools(server, graphService, READ_ONLY);
     return { server, graphService };
 }
 export async function startHttpServer() {

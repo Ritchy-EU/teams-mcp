@@ -1,4 +1,6 @@
+import type { ChatMessageAttachment } from "@microsoft/microsoft-graph-types";
 import type { IGraphService } from "../services/graph.js";
+import type { AttachmentSummary } from "../types/graph.js";
 export interface ImageAttachment {
     id: string;
     contentType: string;
@@ -34,4 +36,9 @@ export declare function imageUrlToBase64(imageUrl: string): Promise<{
     data: string;
     contentType: string;
 } | null>;
+/**
+ * Extracts a minimal attachment summary from Graph API ChatMessageAttachment array.
+ * Returns undefined if there are no meaningful attachments to report.
+ */
+export declare function extractAttachmentSummaries(attachments: ChatMessageAttachment[] | null | undefined): AttachmentSummary[] | undefined;
 //# sourceMappingURL=attachments.d.ts.map

@@ -7,7 +7,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { ErrorRequestHandler } from "express";
-import { BASE_URL, DELEGATED_SCOPES, PORT } from "../config.js";
+import { BASE_URL, DELEGATED_SCOPES, PORT, READ_ONLY } from "../config.js";
 import { SessionGraphService } from "../services/graph.js";
 import { registerAuthTools } from "../tools/auth.js";
 import { registerChatTools } from "../tools/chats.js";
@@ -34,12 +34,12 @@ function createSessionServer(tokenAccessor: () => Promise<string>): {
 
   const graphService = new SessionGraphService(tokenAccessor);
 
-  registerAuthTools(server, graphService);
-  registerUsersTools(server, graphService);
-  registerOrganizationTools(server, graphService);
-  registerTeamsTools(server, graphService);
-  registerChatTools(server, graphService);
-  registerSearchTools(server, graphService);
+  registerAuthTools(server, graphService, READ_ONLY);
+  registerUsersTools(server, graphService, READ_ONLY);
+  registerOrganizationTools(server, graphService, READ_ONLY);
+  registerTeamsTools(server, graphService, READ_ONLY);
+  registerChatTools(server, graphService, READ_ONLY);
+  registerSearchTools(server, graphService, READ_ONLY);
 
   return { server, graphService };
 }

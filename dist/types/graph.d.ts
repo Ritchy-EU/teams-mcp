@@ -1,5 +1,5 @@
-import type { Channel, ChannelMembershipType, Chat, ChatMessage, ChatMessageImportance, ChatMessageInfo, ChatType, ConversationMember, DirectoryObject, NullableOption, Team, TeamSpecialization, TeamsAppInstallation, TeamVisibilityType, User } from "@microsoft/microsoft-graph-types";
-export type { User, Chat, Team, Channel, ChatMessage, ConversationMember, DirectoryObject, TeamsAppInstallation, ChatMessageInfo, ChannelMembershipType, ChatType, ChatMessageImportance, TeamSpecialization, TeamVisibilityType, NullableOption, };
+import type { Channel, ChannelMembershipType, Chat, ChatMessage, ChatMessageAttachment, ChatMessageImportance, ChatMessageInfo, ChatMessageReaction, ChatType, ConversationMember, DirectoryObject, NullableOption, Team, TeamSpecialization, TeamsAppInstallation, TeamVisibilityType, User } from "@microsoft/microsoft-graph-types";
+export type { User, Chat, Team, Channel, ChatMessage, ChatMessageAttachment, ChatMessageReaction, ConversationMember, DirectoryObject, TeamsAppInstallation, ChatMessageInfo, ChannelMembershipType, ChatType, ChatMessageImportance, TeamSpecialization, TeamVisibilityType, NullableOption, };
 export interface GraphApiResponse<T> {
     value?: T[];
     "@odata.count"?: number;
@@ -43,10 +43,16 @@ export interface ChatSummary {
     memberCount?: number | undefined;
 }
 export interface AttachmentSummary {
-    id?: NullableOption<string> | undefined;
-    name?: NullableOption<string> | undefined;
-    contentType?: NullableOption<string> | undefined;
-    contentUrl?: NullableOption<string> | undefined;
+    id?: string | undefined;
+    name?: string | undefined;
+    contentType?: string | undefined;
+    contentUrl?: string | undefined;
+    thumbnailUrl?: string | undefined;
+}
+export interface ReactionSummary {
+    reactionType?: string | undefined;
+    displayName?: NullableOption<string> | undefined;
+    createdDateTime?: string | undefined;
 }
 export interface MessageSummary {
     id?: string | undefined;
@@ -55,6 +61,7 @@ export interface MessageSummary {
     createdDateTime?: NullableOption<string> | undefined;
     importance?: ChatMessageImportance | undefined;
     attachments?: AttachmentSummary[] | undefined;
+    reactions?: ReactionSummary[] | undefined;
 }
 export interface MemberSummary {
     id?: string | undefined;

@@ -3,8 +3,10 @@ import type {
   ChannelMembershipType,
   Chat,
   ChatMessage,
+  ChatMessageAttachment,
   ChatMessageImportance,
   ChatMessageInfo,
+  ChatMessageReaction,
   ChatType,
   ConversationMember,
   DirectoryObject,
@@ -23,6 +25,8 @@ export type {
   Team,
   Channel,
   ChatMessage,
+  ChatMessageAttachment,
+  ChatMessageReaction,
   ConversationMember,
   DirectoryObject,
   TeamsAppInstallation,
@@ -86,10 +90,17 @@ export interface ChatSummary {
 }
 
 export interface AttachmentSummary {
-  id?: NullableOption<string> | undefined;
-  name?: NullableOption<string> | undefined;
-  contentType?: NullableOption<string> | undefined;
-  contentUrl?: NullableOption<string> | undefined;
+  id?: string | undefined;
+  name?: string | undefined;
+  contentType?: string | undefined;
+  contentUrl?: string | undefined;
+  thumbnailUrl?: string | undefined;
+}
+
+export interface ReactionSummary {
+  reactionType?: string | undefined;
+  displayName?: NullableOption<string> | undefined;
+  createdDateTime?: string | undefined;
 }
 
 export interface MessageSummary {
@@ -99,6 +110,7 @@ export interface MessageSummary {
   createdDateTime?: NullableOption<string> | undefined;
   importance?: ChatMessageImportance | undefined;
   attachments?: AttachmentSummary[] | undefined;
+  reactions?: ReactionSummary[] | undefined;
 }
 
 export interface MemberSummary {

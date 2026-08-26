@@ -24,7 +24,11 @@ export function formatSearchHits(hits: SearchHit[]) {
   }));
 }
 
-export function registerSearchTools(server: McpServer, graphService: IGraphService) {
+export function registerSearchTools(
+  server: McpServer,
+  graphService: IGraphService,
+  _readOnly: boolean
+) {
   server.tool(
     "search_messages",
     [

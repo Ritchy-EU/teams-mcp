@@ -17,7 +17,11 @@ function toUserSummary(obj: DirectoryObject): UserSummary {
   };
 }
 
-export function registerOrganizationTools(server: McpServer, graphService: IGraphService) {
+export function registerOrganizationTools(
+  server: McpServer,
+  graphService: IGraphService,
+  _readOnly: boolean
+) {
   // Get user's manager
   server.tool(
     "get_user_manager",

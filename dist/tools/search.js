@@ -19,7 +19,7 @@ export function formatSearchHits(hits) {
         channelId: hit.resource.channelIdentity?.channelId,
     }));
 }
-export function registerSearchTools(server, graphService) {
+export function registerSearchTools(server, graphService, _readOnly) {
     server.tool("search_messages", [
         "Search for messages across all Microsoft Teams channels and chats using the Microsoft Search API.",
         "The query string supports KQL (Keyword Query Language) syntax for advanced filtering:",

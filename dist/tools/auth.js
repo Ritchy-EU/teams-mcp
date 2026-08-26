@@ -1,4 +1,4 @@
-export function registerAuthTools(server, graphService) {
+export function registerAuthTools(server, graphService, _readOnly) {
     // Authentication status tool
     server.tool("auth_status", "Check the authentication status of the Microsoft Graph connection. Returns whether the user is authenticated and shows their basic profile information.", {}, async () => {
         const status = await graphService.getAuthStatus();

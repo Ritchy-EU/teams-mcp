@@ -88,4 +88,26 @@ export async function imageUrlToBase64(imageUrl) {
         return null;
     }
 }
+/**
+ * Extracts a minimal attachment summary from Graph API ChatMessageAttachment array.
+ * Returns undefined if there are no meaningful attachments to report.
+ */
+export function extractAttachmentSummaries(attachments) {
+    if (!attachments || attachments.length === 0) {
+        return undefined;
+    }
+    const summaries = [];
+    for (const att of attachments) {
+        if (!att.id && !att.name && !att.contentUrl)
+            continue;
+        summaries.push({
+            id: att.id ?? undefined,
+            name: att.name ?? undefined,
+            contentType: att.contentType ?? undefined,
+            contentUrl: att.contentUrl ?? undefined,
+            thumbnailUrl: att.thumbnailUrl ?? undefined,
+        });
+    }
+    return summaries.length > 0 ? summaries : undefined;
+}
 //# sourceMappingURL=attachments.js.map

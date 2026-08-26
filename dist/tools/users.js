@@ -5,7 +5,7 @@ import { z } from "zod";
 function escapeODataString(value) {
     return value.replace(/'/g, "''");
 }
-export function registerUsersTools(server, graphService) {
+export function registerUsersTools(server, graphService, _readOnly) {
     // Get current user
     server.tool("get_current_user", "Get the current authenticated user's profile information including display name, email, job title, and department.", {}, async () => {
         try {

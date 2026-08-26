@@ -5,19 +5,29 @@ import type {
   Channel,
   ChannelSummary,
   ChatMessage,
+  ChatMessageReaction,
   ConversationMember,
   GraphApiResponse,
   MemberSummary,
   MessageSummary,
+  ReactionSummary,
   Team,
   TeamSummary,
 } from "../types/graph.js";
 import {
+  extractAttachmentSummaries,
   type ImageAttachment,
   imageUrlToBase64,
   isValidImageType,
   uploadImageAsHostedContent,
 } from "../utils/attachments.js";
+import { detectContentType } from "../utils/content-type.js";
+import {
+  buildFileAttachment,
+  escapeHtml,
+  formatFileSize,
+  uploadFileToChannel,
+} from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml, searchUsers, type UserInfo } from "../utils/users.js";
 
@@ -31,7 +41,11 @@ import { processMentionsInHtml, searchUsers, type UserInfo } from "../utils/user
  * @param server - The MCP server instance to register tools on.
  * @param graphService - The Microsoft Graph service used for API calls.
  */
-export function registerTeamsTools(server: McpServer, graphService: IGraphService) {
+export function registerTeamsTools(
+  server: McpServer,
+  graphService: IGraphService,
+  readOnly: boolean
+) {
   // List user's teams
   server.tool(
     "list_teams",
@@ -181,6 +195,14 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
           from: message.from?.user?.displayName,
           createdDateTime: message.createdDateTime,
           importance: message.importance,
+          attachments: extractAttachmentSummaries(message.attachments),
+          reactions: message.reactions?.map(
+            (r: ChatMessageReaction): ReactionSummary => ({
+              reactionType: r.reactionType,
+              displayName: r.displayName,
+              createdDateTime: r.createdDateTime,
+            })
+          ),
         }));
 
         // Sort messages by creation date (newest first) since API doesn't support orderby
@@ -220,214 +242,219 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
     }
   );
 
-  // Send message to channel
-  server.tool(
-    "send_channel_message",
-    "Send a message to a specific channel in a Microsoft Team. Supports text and markdown formatting, mentions, and importance levels.",
-    {
-      teamId: z.string().describe("Team ID"),
-      channelId: z.string().describe("Channel ID"),
-      message: z.string().describe("Message content"),
-      importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
-      format: z.enum(["text", "markdown"]).optional().describe("Message format (text or markdown)"),
-      mentions: z
-        .array(
-          z.object({
-            mention: z
-              .string()
-              .describe("The @mention text (e.g., 'john.doe' or 'john.doe@company.com')"),
-            userId: z.string().describe("Azure AD User ID of the mentioned user"),
-          })
-        )
-        .optional()
-        .describe("Array of @mentions to include in the message"),
-      imageUrl: z.string().optional().describe("URL of an image to attach to the message"),
-      imageData: z.string().optional().describe("Base64 encoded image data to attach"),
-      imageContentType: z
-        .string()
-        .optional()
-        .describe("MIME type of the image (e.g., 'image/jpeg', 'image/png')"),
-      imageFileName: z.string().optional().describe("Name for the attached image file"),
-    },
-    async ({
-      teamId,
-      channelId,
-      message,
-      importance = "normal",
-      format = "text",
-      mentions,
-      imageUrl,
-      imageData,
-      imageContentType,
-      imageFileName,
-    }) => {
-      try {
-        const client = await graphService.getClient();
+  // Send message to channel (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "send_channel_message",
+      "Send a message to a specific channel in a Microsoft Team. Supports text and markdown formatting, mentions, and importance levels.",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        message: z.string().describe("Message content"),
+        importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
+        format: z
+          .enum(["text", "markdown"])
+          .optional()
+          .describe("Message format (text or markdown)"),
+        mentions: z
+          .array(
+            z.object({
+              mention: z
+                .string()
+                .describe("The @mention text (e.g., 'john.doe' or 'john.doe@company.com')"),
+              userId: z.string().describe("Azure AD User ID of the mentioned user"),
+            })
+          )
+          .optional()
+          .describe("Array of @mentions to include in the message"),
+        imageUrl: z.string().optional().describe("URL of an image to attach to the message"),
+        imageData: z.string().optional().describe("Base64 encoded image data to attach"),
+        imageContentType: z
+          .string()
+          .optional()
+          .describe("MIME type of the image (e.g., 'image/jpeg', 'image/png')"),
+        imageFileName: z.string().optional().describe("Name for the attached image file"),
+      },
+      async ({
+        teamId,
+        channelId,
+        message,
+        importance = "normal",
+        format = "text",
+        mentions,
+        imageUrl,
+        imageData,
+        imageContentType,
+        imageFileName,
+      }) => {
+        try {
+          const client = await graphService.getClient();
 
-        // Process message content based on format
-        let content: string;
-        let contentType: "text" | "html";
+          // Process message content based on format
+          let content: string;
+          let contentType: "text" | "html";
 
-        if (format === "markdown") {
-          content = await markdownToHtml(message);
-          contentType = "html";
-        } else {
-          content = message;
-          contentType = "text";
-        }
+          if (format === "markdown") {
+            content = await markdownToHtml(message);
+            contentType = "html";
+          } else {
+            content = message;
+            contentType = "text";
+          }
 
-        // Process @mentions if provided
-        const mentionMappings: Array<{ mention: string; userId: string; displayName: string }> = [];
-        if (mentions && mentions.length > 0) {
-          // Convert provided mentions to mappings with display names
-          for (const mention of mentions) {
-            try {
-              // Get user info to get display name
-              const userResponse = await client
-                .api(`/users/${mention.userId}`)
-                .select("displayName")
-                .get();
-              mentionMappings.push({
-                mention: mention.mention,
-                userId: mention.userId,
-                displayName: userResponse.displayName || mention.mention,
-              });
-            } catch (_error) {
-              console.warn(
-                `Could not resolve user ${mention.userId}, using mention text as display name`
+          // Process @mentions if provided
+          const mentionMappings: Array<{ mention: string; userId: string; displayName: string }> =
+            [];
+          if (mentions && mentions.length > 0) {
+            // Convert provided mentions to mappings with display names
+            for (const mention of mentions) {
+              try {
+                // Get user info to get display name
+                const userResponse = await client
+                  .api(`/users/${mention.userId}`)
+                  .select("displayName")
+                  .get();
+                mentionMappings.push({
+                  mention: mention.mention,
+                  userId: mention.userId,
+                  displayName: userResponse.displayName || mention.mention,
+                });
+              } catch (_error) {
+                console.warn(
+                  `Could not resolve user ${mention.userId}, using mention text as display name`
+                );
+                mentionMappings.push({
+                  mention: mention.mention,
+                  userId: mention.userId,
+                  displayName: mention.mention,
+                });
+              }
+            }
+          }
+
+          // Process mentions in HTML content
+          let finalMentions: Array<{
+            id: number;
+            mentionText: string;
+            mentioned: { user: { id: string } };
+          }> = [];
+          if (mentionMappings.length > 0) {
+            const result = processMentionsInHtml(content, mentionMappings);
+            content = result.content;
+            finalMentions = result.mentions;
+
+            // Ensure we're using HTML content type when mentions are present
+            contentType = "html";
+          }
+
+          // Handle image attachment
+          const attachments: ImageAttachment[] = [];
+          if (imageUrl || imageData) {
+            let imageInfo: { data: string; contentType: string } | null = null;
+
+            if (imageUrl) {
+              imageInfo = await imageUrlToBase64(imageUrl);
+              if (!imageInfo) {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `❌ Failed to download image from URL: ${imageUrl}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+            } else if (imageData && imageContentType) {
+              if (!isValidImageType(imageContentType)) {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `❌ Unsupported image type: ${imageContentType}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              imageInfo = { data: imageData, contentType: imageContentType };
+            }
+
+            if (imageInfo) {
+              const uploadResult = await uploadImageAsHostedContent(
+                graphService,
+                teamId,
+                channelId,
+                imageInfo.data,
+                imageInfo.contentType,
+                imageFileName
               );
-              mentionMappings.push({
-                mention: mention.mention,
-                userId: mention.userId,
-                displayName: mention.mention,
-              });
+
+              if (uploadResult) {
+                attachments.push(uploadResult.attachment);
+              } else {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: "❌ Failed to upload image attachment",
+                    },
+                  ],
+                  isError: true,
+                };
+              }
             }
           }
-        }
 
-        // Process mentions in HTML content
-        let finalMentions: Array<{
-          id: number;
-          mentionText: string;
-          mentioned: { user: { id: string } };
-        }> = [];
-        if (mentionMappings.length > 0) {
-          const result = processMentionsInHtml(content, mentionMappings);
-          content = result.content;
-          finalMentions = result.mentions;
-
-          // Ensure we're using HTML content type when mentions are present
-          contentType = "html";
-        }
-
-        // Handle image attachment
-        const attachments: ImageAttachment[] = [];
-        if (imageUrl || imageData) {
-          let imageInfo: { data: string; contentType: string } | null = null;
-
-          if (imageUrl) {
-            imageInfo = await imageUrlToBase64(imageUrl);
-            if (!imageInfo) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `❌ Failed to download image from URL: ${imageUrl}`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-          } else if (imageData && imageContentType) {
-            if (!isValidImageType(imageContentType)) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `❌ Unsupported image type: ${imageContentType}`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-            imageInfo = { data: imageData, contentType: imageContentType };
-          }
-
-          if (imageInfo) {
-            const uploadResult = await uploadImageAsHostedContent(
-              graphService,
-              teamId,
-              channelId,
-              imageInfo.data,
-              imageInfo.contentType,
-              imageFileName
-            );
-
-            if (uploadResult) {
-              attachments.push(uploadResult.attachment);
-            } else {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: "❌ Failed to upload image attachment",
-                  },
-                ],
-                isError: true,
-              };
-            }
-          }
-        }
-
-        // Build message payload
-        const messagePayload: any = {
-          body: {
-            content,
-            contentType,
-          },
-          importance,
-        };
-
-        if (finalMentions.length > 0) {
-          messagePayload.mentions = finalMentions;
-        }
-
-        if (attachments.length > 0) {
-          messagePayload.attachments = attachments;
-        }
-
-        const result = (await client
-          .api(`/teams/${teamId}/channels/${channelId}/messages`)
-          .post(messagePayload)) as ChatMessage;
-
-        // Build success message
-        const successText = `✅ Message sent successfully. Message ID: ${result.id}${
-          finalMentions.length > 0
-            ? `\n📱 Mentions: ${finalMentions.map((m) => m.mentionText).join(", ")}`
-            : ""
-        }${attachments.length > 0 ? `\n🖼️ Image attached: ${attachments[0].name}` : ""}`;
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: successText,
+          // Build message payload
+          const messagePayload: any = {
+            body: {
+              content,
+              contentType,
             },
-          ],
-        };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `❌ Failed to send message: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+            importance,
+          };
+
+          if (finalMentions.length > 0) {
+            messagePayload.mentions = finalMentions;
+          }
+
+          if (attachments.length > 0) {
+            messagePayload.attachments = attachments;
+          }
+
+          const result = (await client
+            .api(`/teams/${teamId}/channels/${channelId}/messages`)
+            .post(messagePayload)) as ChatMessage;
+
+          // Build success message
+          const successText = `✅ Message sent successfully. Message ID: ${result.id}${
+            finalMentions.length > 0
+              ? `\n📱 Mentions: ${finalMentions.map((m) => m.mentionText).join(", ")}`
+              : ""
+          }${attachments.length > 0 ? `\n🖼️ Image attached: ${attachments[0].name}` : ""}`;
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: successText,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to send message: ${error.message}`,
+              },
+            ],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
 
   // Get replies to a message in a channel
   server.tool(
@@ -476,6 +503,14 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
           from: reply.from?.user?.displayName,
           createdDateTime: reply.createdDateTime,
           importance: reply.importance,
+          attachments: extractAttachmentSummaries(reply.attachments),
+          reactions: reply.reactions?.map(
+            (r: ChatMessageReaction): ReactionSummary => ({
+              reactionType: r.reactionType,
+              displayName: r.displayName,
+              createdDateTime: r.createdDateTime,
+            })
+          ),
         }));
 
         // Sort replies by creation date (oldest first for replies)
@@ -516,216 +551,221 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
     }
   );
 
-  // Reply to a message in a channel
-  server.tool(
-    "reply_to_channel_message",
-    "Reply to a specific message in a channel. Supports text and markdown formatting, mentions, and importance levels.",
-    {
-      teamId: z.string().describe("Team ID"),
-      channelId: z.string().describe("Channel ID"),
-      messageId: z.string().describe("Message ID to reply to"),
-      message: z.string().describe("Reply content"),
-      importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
-      format: z.enum(["text", "markdown"]).optional().describe("Message format (text or markdown)"),
-      mentions: z
-        .array(
-          z.object({
-            mention: z
-              .string()
-              .describe("The @mention text (e.g., 'john.doe' or 'john.doe@company.com')"),
-            userId: z.string().describe("Azure AD User ID of the mentioned user"),
-          })
-        )
-        .optional()
-        .describe("Array of @mentions to include in the reply"),
-      imageUrl: z.string().optional().describe("URL of an image to attach to the reply"),
-      imageData: z.string().optional().describe("Base64 encoded image data to attach"),
-      imageContentType: z
-        .string()
-        .optional()
-        .describe("MIME type of the image (e.g., 'image/jpeg', 'image/png')"),
-      imageFileName: z.string().optional().describe("Name for the attached image file"),
-    },
-    async ({
-      teamId,
-      channelId,
-      messageId,
-      message,
-      importance = "normal",
-      format = "text",
-      mentions,
-      imageUrl,
-      imageData,
-      imageContentType,
-      imageFileName,
-    }) => {
-      try {
-        const client = await graphService.getClient();
+  // Reply to a message in a channel (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "reply_to_channel_message",
+      "Reply to a specific message in a channel. Supports text and markdown formatting, mentions, and importance levels.",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        messageId: z.string().describe("Message ID to reply to"),
+        message: z.string().describe("Reply content"),
+        importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
+        format: z
+          .enum(["text", "markdown"])
+          .optional()
+          .describe("Message format (text or markdown)"),
+        mentions: z
+          .array(
+            z.object({
+              mention: z
+                .string()
+                .describe("The @mention text (e.g., 'john.doe' or 'john.doe@company.com')"),
+              userId: z.string().describe("Azure AD User ID of the mentioned user"),
+            })
+          )
+          .optional()
+          .describe("Array of @mentions to include in the reply"),
+        imageUrl: z.string().optional().describe("URL of an image to attach to the reply"),
+        imageData: z.string().optional().describe("Base64 encoded image data to attach"),
+        imageContentType: z
+          .string()
+          .optional()
+          .describe("MIME type of the image (e.g., 'image/jpeg', 'image/png')"),
+        imageFileName: z.string().optional().describe("Name for the attached image file"),
+      },
+      async ({
+        teamId,
+        channelId,
+        messageId,
+        message,
+        importance = "normal",
+        format = "text",
+        mentions,
+        imageUrl,
+        imageData,
+        imageContentType,
+        imageFileName,
+      }) => {
+        try {
+          const client = await graphService.getClient();
 
-        // Process message content based on format
-        let content: string;
-        let contentType: "text" | "html";
+          // Process message content based on format
+          let content: string;
+          let contentType: "text" | "html";
 
-        if (format === "markdown") {
-          content = await markdownToHtml(message);
-          contentType = "html";
-        } else {
-          content = message;
-          contentType = "text";
-        }
+          if (format === "markdown") {
+            content = await markdownToHtml(message);
+            contentType = "html";
+          } else {
+            content = message;
+            contentType = "text";
+          }
 
-        // Process @mentions if provided
-        const mentionMappings: Array<{ mention: string; userId: string; displayName: string }> = [];
-        if (mentions && mentions.length > 0) {
-          // Convert provided mentions to mappings with display names
-          for (const mention of mentions) {
-            try {
-              // Get user info to get display name
-              const userResponse = await client
-                .api(`/users/${mention.userId}`)
-                .select("displayName")
-                .get();
-              mentionMappings.push({
-                mention: mention.mention,
-                userId: mention.userId,
-                displayName: userResponse.displayName || mention.mention,
-              });
-            } catch (_error) {
-              console.warn(
-                `Could not resolve user ${mention.userId}, using mention text as display name`
+          // Process @mentions if provided
+          const mentionMappings: Array<{ mention: string; userId: string; displayName: string }> =
+            [];
+          if (mentions && mentions.length > 0) {
+            // Convert provided mentions to mappings with display names
+            for (const mention of mentions) {
+              try {
+                // Get user info to get display name
+                const userResponse = await client
+                  .api(`/users/${mention.userId}`)
+                  .select("displayName")
+                  .get();
+                mentionMappings.push({
+                  mention: mention.mention,
+                  userId: mention.userId,
+                  displayName: userResponse.displayName || mention.mention,
+                });
+              } catch (_error) {
+                console.warn(
+                  `Could not resolve user ${mention.userId}, using mention text as display name`
+                );
+                mentionMappings.push({
+                  mention: mention.mention,
+                  userId: mention.userId,
+                  displayName: mention.mention,
+                });
+              }
+            }
+          }
+
+          // Process mentions in HTML content
+          let finalMentions: Array<{
+            id: number;
+            mentionText: string;
+            mentioned: { user: { id: string } };
+          }> = [];
+          if (mentionMappings.length > 0) {
+            const result = processMentionsInHtml(content, mentionMappings);
+            content = result.content;
+            finalMentions = result.mentions;
+
+            // Ensure we're using HTML content type when mentions are present
+            contentType = "html";
+          }
+
+          // Handle image attachment
+          const attachments: ImageAttachment[] = [];
+          if (imageUrl || imageData) {
+            let imageInfo: { data: string; contentType: string } | null = null;
+
+            if (imageUrl) {
+              imageInfo = await imageUrlToBase64(imageUrl);
+              if (!imageInfo) {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `❌ Failed to download image from URL: ${imageUrl}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+            } else if (imageData && imageContentType) {
+              if (!isValidImageType(imageContentType)) {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `❌ Unsupported image type: ${imageContentType}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              imageInfo = { data: imageData, contentType: imageContentType };
+            }
+
+            if (imageInfo) {
+              const uploadResult = await uploadImageAsHostedContent(
+                graphService,
+                teamId,
+                channelId,
+                imageInfo.data,
+                imageInfo.contentType,
+                imageFileName
               );
-              mentionMappings.push({
-                mention: mention.mention,
-                userId: mention.userId,
-                displayName: mention.mention,
-              });
+
+              if (uploadResult) {
+                attachments.push(uploadResult.attachment);
+              } else {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: "❌ Failed to upload image attachment",
+                    },
+                  ],
+                  isError: true,
+                };
+              }
             }
           }
-        }
 
-        // Process mentions in HTML content
-        let finalMentions: Array<{
-          id: number;
-          mentionText: string;
-          mentioned: { user: { id: string } };
-        }> = [];
-        if (mentionMappings.length > 0) {
-          const result = processMentionsInHtml(content, mentionMappings);
-          content = result.content;
-          finalMentions = result.mentions;
-
-          // Ensure we're using HTML content type when mentions are present
-          contentType = "html";
-        }
-
-        // Handle image attachment
-        const attachments: ImageAttachment[] = [];
-        if (imageUrl || imageData) {
-          let imageInfo: { data: string; contentType: string } | null = null;
-
-          if (imageUrl) {
-            imageInfo = await imageUrlToBase64(imageUrl);
-            if (!imageInfo) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `❌ Failed to download image from URL: ${imageUrl}`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-          } else if (imageData && imageContentType) {
-            if (!isValidImageType(imageContentType)) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `❌ Unsupported image type: ${imageContentType}`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-            imageInfo = { data: imageData, contentType: imageContentType };
-          }
-
-          if (imageInfo) {
-            const uploadResult = await uploadImageAsHostedContent(
-              graphService,
-              teamId,
-              channelId,
-              imageInfo.data,
-              imageInfo.contentType,
-              imageFileName
-            );
-
-            if (uploadResult) {
-              attachments.push(uploadResult.attachment);
-            } else {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: "❌ Failed to upload image attachment",
-                  },
-                ],
-                isError: true,
-              };
-            }
-          }
-        }
-
-        // Build message payload
-        const messagePayload: any = {
-          body: {
-            content,
-            contentType,
-          },
-          importance,
-        };
-
-        if (finalMentions.length > 0) {
-          messagePayload.mentions = finalMentions;
-        }
-
-        if (attachments.length > 0) {
-          messagePayload.attachments = attachments;
-        }
-
-        const result = (await client
-          .api(`/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`)
-          .post(messagePayload)) as ChatMessage;
-
-        // Build success message
-        const successText = `✅ Reply sent successfully. Reply ID: ${result.id}${
-          finalMentions.length > 0
-            ? `\n📱 Mentions: ${finalMentions.map((m) => m.mentionText).join(", ")}`
-            : ""
-        }${attachments.length > 0 ? `\n🖼️ Image attached: ${attachments[0].name}` : ""}`;
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: successText,
+          // Build message payload
+          const messagePayload: any = {
+            body: {
+              content,
+              contentType,
             },
-          ],
-        };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `❌ Failed to send reply: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
+            importance,
+          };
+
+          if (finalMentions.length > 0) {
+            messagePayload.mentions = finalMentions;
+          }
+
+          if (attachments.length > 0) {
+            messagePayload.attachments = attachments;
+          }
+
+          const result = (await client
+            .api(`/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`)
+            .post(messagePayload)) as ChatMessage;
+
+          // Build success message
+          const successText = `✅ Reply sent successfully. Reply ID: ${result.id}${
+            finalMentions.length > 0
+              ? `\n📱 Mentions: ${finalMentions.map((m) => m.mentionText).join(", ")}`
+              : ""
+          }${attachments.length > 0 ? `\n🖼️ Image attached: ${attachments[0].name}` : ""}`;
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: successText,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to send reply: ${error.message}`,
+              },
+            ],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
 
   // List team members
   server.tool(
@@ -854,6 +894,10 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
       teamId: z.string().describe("Team ID"),
       channelId: z.string().describe("Channel ID"),
       messageId: z.string().describe("Message ID containing the hosted content"),
+      replyId: z
+        .string()
+        .optional()
+        .describe("Reply ID if downloading hosted content from a reply to a message (optional)"),
       hostedContentId: z
         .string()
         .optional()
@@ -867,14 +911,17 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
           "Optional file path to save the content. Supports UNC paths (e.g., \\\\wsl.localhost\\Ubuntu\\tmp\\file.png)."
         ),
     },
-    async ({ teamId, channelId, messageId, hostedContentId, savePath }) => {
+    async ({ teamId, channelId, messageId, replyId, hostedContentId, savePath }) => {
       try {
         const client = await graphService.getClient();
 
+        // Build endpoint based on whether it's a reply or main message
+        const messageEndpoint = replyId
+          ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}`
+          : `/teams/${teamId}/channels/${channelId}/messages/${messageId}`;
+
         // First, get the message to find hosted content references
-        const message = (await client
-          .api(`/teams/${teamId}/channels/${channelId}/messages/${messageId}`)
-          .get()) as ChatMessage;
+        const message = (await client.api(messageEndpoint).get()) as ChatMessage;
 
         if (!message) {
           return {
@@ -929,11 +976,14 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
 
         for (const contentId of contentIds) {
           try {
+            // Build hosted content endpoint based on whether it's a reply or main message
+            const hostedContentEndpoint = replyId
+              ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}/hostedContents/${contentId}/$value`
+              : `/teams/${teamId}/channels/${channelId}/messages/${messageId}/hostedContents/${contentId}/$value`;
+
             // Get the hosted content binary data
             const response = await client
-              .api(
-                `/teams/${teamId}/channels/${channelId}/messages/${messageId}/hostedContents/${contentId}/$value`
-              )
+              .api(hostedContentEndpoint)
               .responseType("arraybuffer" as any)
               .get();
 
@@ -942,7 +992,7 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
             const base64Data = buffer.toString("base64");
 
             // Determine content type from the response or default to image/png
-            const contentType = "image/png"; // Graph API doesn't return content-type header easily
+            const contentType = detectContentType(buffer);
 
             const result: {
               id: string;
@@ -973,6 +1023,17 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
               const isUncPath =
                 normalizedPath.startsWith("\\\\") || normalizedPath.startsWith("//");
               console.error(`[DEBUG] isUncPath: ${isUncPath}`);
+
+              // Basic path traversal protection
+              if (!isUncPath && normalizedPath.includes("..")) {
+                results.push({
+                  id: contentId,
+                  contentType: "unknown",
+                  size: 0,
+                  error: "Path traversal not allowed",
+                });
+                continue;
+              }
 
               // If multiple files, append index to filename
               let finalPath = normalizedPath;
@@ -1024,6 +1085,7 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
                 {
                   summary,
                   messageId,
+                  ...(replyId && { replyId }),
                   totalContentItems: contentIds.length,
                   successCount,
                   errorCount,
@@ -1049,196 +1111,407 @@ export function registerTeamsTools(server: McpServer, graphService: IGraphServic
     }
   );
 
-  // Soft delete a channel message
-  server.tool(
-    "delete_channel_message",
-    "Soft delete a message in a channel. Only the message sender can delete their own messages. The message will be marked as deleted.",
-    {
-      teamId: z.string().describe("Team ID"),
-      channelId: z.string().describe("Channel ID"),
-      messageId: z.string().describe("Message ID to delete"),
-      replyId: z
-        .string()
-        .optional()
-        .describe("Reply ID if deleting a reply to a message (optional)"),
-    },
-    async ({ teamId, channelId, messageId, replyId }) => {
-      try {
-        const client = await graphService.getClient();
+  // Soft delete a channel message (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "delete_channel_message",
+      "Soft delete a message in a channel. Only the message sender can delete their own messages. The message will be marked as deleted.",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        messageId: z.string().describe("Message ID to delete"),
+        replyId: z
+          .string()
+          .optional()
+          .describe("Reply ID if deleting a reply to a message (optional)"),
+      },
+      async ({ teamId, channelId, messageId, replyId }) => {
+        try {
+          const client = await graphService.getClient();
 
-        // Build endpoint based on whether it's a reply or main message
-        // POST /teams/{teamId}/channels/{channelId}/messages/{chatMessageId}/softDelete
-        // POST /teams/{teamId}/channels/{channelId}/messages/{messageId}/replies/{replyId}/softDelete
-        const endpoint = replyId
-          ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}/softDelete`
-          : `/teams/${teamId}/channels/${channelId}/messages/${messageId}/softDelete`;
+          // Build endpoint based on whether it's a reply or main message
+          // POST /teams/{teamId}/channels/{channelId}/messages/{chatMessageId}/softDelete
+          // POST /teams/{teamId}/channels/{channelId}/messages/{messageId}/replies/{replyId}/softDelete
+          const endpoint = replyId
+            ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}/softDelete`
+            : `/teams/${teamId}/channels/${channelId}/messages/${messageId}/softDelete`;
 
-        // Soft delete the message using POST
-        await client.api(endpoint).post({});
+          // Soft delete the message using POST
+          await client.api(endpoint).post({});
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `✅ ${replyId ? "Reply" : "Message"} deleted successfully.${replyId ? ` Reply ID: ${replyId}` : ` Message ID: ${messageId}`}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `❌ Failed to delete ${replyId ? "reply" : "message"}: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-  );
-
-  // Update/Edit a channel message
-  server.tool(
-    "update_channel_message",
-    "Update (edit) a message in a channel that was previously sent. Only the message sender can update their own messages.",
-    {
-      teamId: z.string().describe("Team ID"),
-      channelId: z.string().describe("Channel ID"),
-      messageId: z.string().describe("Message ID to update"),
-      replyId: z
-        .string()
-        .optional()
-        .describe("Reply ID if updating a reply to a message (optional)"),
-      message: z.string().describe("New message content"),
-      importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
-      format: z.enum(["text", "markdown"]).optional().describe("Message format (text or markdown)"),
-      mentions: z
-        .array(
-          z.object({
-            mention: z
-              .string()
-              .describe("The @mention text (e.g., 'john.doe' or 'john.doe@company.com')"),
-            userId: z.string().describe("Azure AD User ID of the mentioned user"),
-          })
-        )
-        .optional()
-        .describe("Array of @mentions to include in the message"),
-    },
-    async ({
-      teamId,
-      channelId,
-      messageId,
-      replyId,
-      message,
-      importance,
-      format = "text",
-      mentions,
-    }) => {
-      try {
-        const client = await graphService.getClient();
-
-        // Process message content based on format
-        let content: string;
-        let contentType: "text" | "html";
-
-        if (format === "markdown") {
-          content = await markdownToHtml(message);
-          contentType = "html";
-        } else {
-          content = message;
-          contentType = "text";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `✅ ${replyId ? "Reply" : "Message"} deleted successfully.${replyId ? ` Reply ID: ${replyId}` : ` Message ID: ${messageId}`}`,
+              },
+            ],
+          };
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to delete ${replyId ? "reply" : "message"}: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
         }
+      }
+    );
 
-        // Process @mentions if provided
-        const mentionMappings: Array<{ mention: string; userId: string; displayName: string }> = [];
-        if (mentions && mentions.length > 0) {
-          for (const mention of mentions) {
-            try {
-              const userResponse = await client
-                .api(`/users/${mention.userId}`)
-                .select("displayName")
-                .get();
-              mentionMappings.push({
-                mention: mention.mention,
-                userId: mention.userId,
-                displayName: userResponse.displayName || mention.mention,
-              });
-            } catch (_error) {
-              console.warn(
-                `Could not resolve user ${mention.userId}, using mention text as display name`
-              );
-              mentionMappings.push({
-                mention: mention.mention,
-                userId: mention.userId,
-                displayName: mention.mention,
-              });
+  // Update/Edit a channel message (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "update_channel_message",
+      "Update (edit) a message in a channel that was previously sent. Only the message sender can update their own messages.",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        messageId: z.string().describe("Message ID to update"),
+        replyId: z
+          .string()
+          .optional()
+          .describe("Reply ID if updating a reply to a message (optional)"),
+        message: z.string().describe("New message content"),
+        importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
+        format: z
+          .enum(["text", "markdown"])
+          .optional()
+          .describe("Message format (text or markdown)"),
+        mentions: z
+          .array(
+            z.object({
+              mention: z
+                .string()
+                .describe("The @mention text (e.g., 'john.doe' or 'john.doe@company.com')"),
+              userId: z.string().describe("Azure AD User ID of the mentioned user"),
+            })
+          )
+          .optional()
+          .describe("Array of @mentions to include in the message"),
+      },
+      async ({
+        teamId,
+        channelId,
+        messageId,
+        replyId,
+        message,
+        importance,
+        format = "text",
+        mentions,
+      }) => {
+        try {
+          const client = await graphService.getClient();
+
+          // Process message content based on format
+          let content: string;
+          let contentType: "text" | "html";
+
+          if (format === "markdown") {
+            content = await markdownToHtml(message);
+            contentType = "html";
+          } else {
+            content = message;
+            contentType = "text";
+          }
+
+          // Process @mentions if provided
+          const mentionMappings: Array<{ mention: string; userId: string; displayName: string }> =
+            [];
+          if (mentions && mentions.length > 0) {
+            for (const mention of mentions) {
+              try {
+                const userResponse = await client
+                  .api(`/users/${mention.userId}`)
+                  .select("displayName")
+                  .get();
+                mentionMappings.push({
+                  mention: mention.mention,
+                  userId: mention.userId,
+                  displayName: userResponse.displayName || mention.mention,
+                });
+              } catch (_error) {
+                console.warn(
+                  `Could not resolve user ${mention.userId}, using mention text as display name`
+                );
+                mentionMappings.push({
+                  mention: mention.mention,
+                  userId: mention.userId,
+                  displayName: mention.mention,
+                });
+              }
             }
           }
-        }
 
-        // Process mentions in HTML content
-        let finalMentions: Array<{
-          id: number;
-          mentionText: string;
-          mentioned: { user: { id: string } };
-        }> = [];
-        if (mentionMappings.length > 0) {
-          const result = processMentionsInHtml(content, mentionMappings);
-          content = result.content;
-          finalMentions = result.mentions;
-          contentType = "html";
-        }
+          // Process mentions in HTML content
+          let finalMentions: Array<{
+            id: number;
+            mentionText: string;
+            mentioned: { user: { id: string } };
+          }> = [];
+          if (mentionMappings.length > 0) {
+            const result = processMentionsInHtml(content, mentionMappings);
+            content = result.content;
+            finalMentions = result.mentions;
+            contentType = "html";
+          }
 
-        // Build message payload for update
-        const messagePayload: any = {
-          body: {
-            content,
-            contentType,
-          },
-        };
-
-        if (importance) {
-          messagePayload.importance = importance;
-        }
-
-        if (finalMentions.length > 0) {
-          messagePayload.mentions = finalMentions;
-        }
-
-        // Update the message using PATCH
-        const endpoint = replyId
-          ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}`
-          : `/teams/${teamId}/channels/${channelId}/messages/${messageId}`;
-        await client.api(endpoint).patch(messagePayload);
-
-        const successText = `✅ Channel ${replyId ? "reply" : "message"} updated successfully.${replyId ? ` Reply ID: ${replyId}` : ` Message ID: ${messageId}`}${
-          finalMentions.length > 0
-            ? `\n📱 Mentions: ${finalMentions.map((m) => m.mentionText).join(", ")}`
-            : ""
-        }`;
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: successText,
+          // Build message payload for update
+          const messagePayload: any = {
+            body: {
+              content,
+              contentType,
             },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `❌ Failed to update channel message: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          };
+
+          if (importance) {
+            messagePayload.importance = importance;
+          }
+
+          if (finalMentions.length > 0) {
+            messagePayload.mentions = finalMentions;
+          }
+
+          // Update the message using PATCH
+          const endpoint = replyId
+            ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}`
+            : `/teams/${teamId}/channels/${channelId}/messages/${messageId}`;
+          await client.api(endpoint).patch(messagePayload);
+
+          const successText = `✅ Channel ${replyId ? "reply" : "message"} updated successfully.${replyId ? ` Reply ID: ${replyId}` : ` Message ID: ${messageId}`}${
+            finalMentions.length > 0
+              ? `\n📱 Mentions: ${finalMentions.map((m) => m.mentionText).join(", ")}`
+              : ""
+          }`;
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: successText,
+              },
+            ],
+          };
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to update channel message: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
+
+  // Set a reaction on a channel message (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "set_channel_message_reaction",
+      "Add a reaction to a message in a Teams channel. Supports Unicode emoji characters and named reactions (like, angry, sad, laugh, heart, surprised). Can also react to replies.",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        messageId: z.string().describe("Message ID to react to"),
+        reactionType: z
+          .string()
+          .describe(
+            'Reaction type - Unicode emoji (e.g., "👍") or named reaction (e.g., "like", "heart")'
+          ),
+        replyId: z.string().optional().describe("Reply ID if reacting to a reply (optional)"),
+      },
+      async ({ teamId, channelId, messageId, reactionType, replyId }) => {
+        try {
+          const client = await graphService.getClient();
+
+          const endpoint = replyId
+            ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}/setReaction`
+            : `/teams/${teamId}/channels/${channelId}/messages/${messageId}/setReaction`;
+
+          await client.api(endpoint).post({ reactionType });
+
+          const targetId = replyId || messageId;
+          const targetType = replyId ? "reply" : "message";
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `✅ Reaction ${reactionType} added to ${targetType} ${targetId}.`,
+              },
+            ],
+          };
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to set reaction: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+  // Unset a reaction on a channel message (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "unset_channel_message_reaction",
+      "Remove a reaction from a message in a Teams channel. Can also remove reactions from replies.",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        messageId: z.string().describe("Message ID to remove reaction from"),
+        reactionType: z
+          .string()
+          .describe(
+            'Reaction type to remove - Unicode emoji (e.g., "👍") or named reaction (e.g., "like", "heart")'
+          ),
+        replyId: z
+          .string()
+          .optional()
+          .describe("Reply ID if removing reaction from a reply (optional)"),
+      },
+      async ({ teamId, channelId, messageId, reactionType, replyId }) => {
+        try {
+          const client = await graphService.getClient();
+
+          const endpoint = replyId
+            ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}/unsetReaction`
+            : `/teams/${teamId}/channels/${channelId}/messages/${messageId}/unsetReaction`;
+
+          await client.api(endpoint).post({ reactionType });
+
+          const targetId = replyId || messageId;
+          const targetType = replyId ? "reply" : "message";
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `✅ Reaction ${reactionType} removed from ${targetType} ${targetId}.`,
+              },
+            ],
+          };
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to unset reaction: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+  // Send a file to a channel (write — skipped in read-only mode)
+  if (!readOnly)
+    server.tool(
+      "send_file_to_channel",
+      "Upload a local file and send it as a message to a Teams channel. Supports any file type (PDF, DOCX, ZIP, images, etc.). The file is uploaded to the channel's SharePoint folder and sent as a reference attachment. If messageId is provided, the file is sent as a reply to that message (thread).",
+      {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        filePath: z.string().describe("Absolute path to the local file to upload"),
+        message: z.string().optional().describe("Optional message text to accompany the file"),
+        fileName: z
+          .string()
+          .optional()
+          .describe("Optional custom filename (defaults to the original file name)"),
+        format: z
+          .enum(["text", "markdown"])
+          .optional()
+          .describe("Message format (text or markdown)"),
+        importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
+        messageId: z
+          .string()
+          .optional()
+          .describe(
+            "Optional message ID to reply to. When provided, the file is sent as a reply in the message thread instead of a new message."
+          ),
+      },
+      async ({
+        teamId,
+        channelId,
+        filePath,
+        message,
+        fileName,
+        format = "text",
+        importance = "normal",
+        messageId,
+      }) => {
+        try {
+          const client = await graphService.getClient();
+
+          const uploadResult = await uploadFileToChannel(
+            graphService,
+            teamId,
+            channelId,
+            filePath,
+            fileName
+          );
+
+          // Build message content — must be HTML with attachment reference tag
+          let content = "";
+          if (message) {
+            if (format === "markdown") {
+              content = await markdownToHtml(message);
+            } else {
+              content = escapeHtml(message);
+            }
+          }
+
+          const attachmentTag = `<attachment id="${uploadResult.attachmentId}"></attachment>`;
+          content = content ? `${content}<br>${attachmentTag}` : attachmentTag;
+
+          const attachments = buildFileAttachment(uploadResult);
+          const messagePayload: any = {
+            body: { content, contentType: "html" },
+            importance,
+            attachments,
+          };
+
+          // If messageId is provided, send as a reply; otherwise send as a new message
+          const apiPath = messageId
+            ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`
+            : `/teams/${teamId}/channels/${channelId}/messages`;
+
+          const result = (await client.api(apiPath).post(messagePayload)) as ChatMessage;
+
+          const replyInfo = messageId ? ` (reply to ${messageId})` : "";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `✅ File sent successfully to channel${replyInfo}.\nFile: ${uploadResult.fileName} (${formatFileSize(uploadResult.fileSize)})\nMessage ID: ${result.id}`,
+              },
+            ],
+          };
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ Failed to send file: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
 }

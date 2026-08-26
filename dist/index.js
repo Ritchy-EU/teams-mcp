@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PublicClientApplication, } from "@azure/msal-node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { AUTHORITY, CLIENT_ID, DELEGATED_SCOPES } from "./config.js";
+import { AUTHORITY, CLIENT_ID, DELEGATED_SCOPES, READ_ONLY } from "./config.js";
 import { cachePlugin } from "./msal-cache.js";
 import { GraphService } from "./services/graph.js";
 import { registerAuthTools } from "./tools/auth.js";
@@ -136,12 +136,12 @@ async function startMcpServer() {
     // Initialize Graph service (singleton)
     const graphService = GraphService.getInstance();
     // Register all tools
-    registerAuthTools(server, graphService);
-    registerUsersTools(server, graphService);
-    registerOrganizationTools(server, graphService);
-    registerTeamsTools(server, graphService);
-    registerChatTools(server, graphService);
-    registerSearchTools(server, graphService);
+    registerAuthTools(server, graphService, READ_ONLY);
+    registerUsersTools(server, graphService, READ_ONLY);
+    registerOrganizationTools(server, graphService, READ_ONLY);
+    registerTeamsTools(server, graphService, READ_ONLY);
+    registerChatTools(server, graphService, READ_ONLY);
+    registerSearchTools(server, graphService, READ_ONLY);
     // Start server
     const transport = new StdioServerTransport();
     await server.connect(transport);
