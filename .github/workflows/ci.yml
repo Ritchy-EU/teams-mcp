@@ -30,10 +30,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: |
-          # Clean install to handle platform-specific binary issues
-          rm -rf node_modules package-lock.json
-          npm install
+        run: npm ci
 
       - name: Run linting and formatting
         run: |
@@ -54,4 +51,8 @@ jobs:
           node dist/index.js check
 
       - name: Security audit
-        run: npm audit --audit-level moderate
+        # Fails on high/critical. Accepted moderates (2026-08): uuid via
+        # @azure/msal-node v2 (msal never calls the vulnerable v3/v5/v6+buf
+        # path; the real fix is the msal-node v5 major upgrade) and the
+        # esbuild dev-server advisory (dev-only toolchain, never runs in CI).
+        run: npm audit --audit-level high
