@@ -1,0 +1,18 @@
+services:
+  teams_mcp:
+    build: .
+    container_name: teams_mcp
+    restart: unless-stopped
+    environment:
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-common}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET}
+      BASE_URL: ${BASE_URL}
+      PORT: ${PORT:-8001}
+    networks:
+      - default
+      - n8n-docker_default
+
+networks:
+  n8n-docker_default:
+    external: true
