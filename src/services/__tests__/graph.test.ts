@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mockUser, server } from "../../test-utils/setup.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockUser } from "../../test-utils/setup.js";
 
 // Mock the msal-cache plugin
 vi.mock("../../msal-cache.js", () => ({
@@ -45,19 +45,16 @@ function setupDefaultMsalMock() {
 describe("GraphService", () => {
   let graphService: GraphService;
 
+  // MSW lifecycle (listen/resetHandlers/close) is managed globally in
+  // src/test-utils/vitest.setup.ts — a second listen() here would throw
+  // "cannot configure an already enabled network" on msw >= 2.13.
   beforeEach(() => {
-    server.listen({ onUnhandledRequest: "error" });
     vi.clearAllMocks();
     setupDefaultMsalMock();
 
     // Reset GraphService singleton
     (GraphService as any).instance = undefined;
     graphService = GraphService.getInstance();
-  });
-
-  afterEach(() => {
-    server.resetHandlers();
-    server.close();
   });
 
   describe("getInstance", () => {
