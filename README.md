@@ -49,6 +49,7 @@ To use this MCP server in Cursor/Claude/VS Code, add the following configuration
 - **1:1 and Group Chats**
   - List user's chats
   - Create new 1:1 or group conversations
+  - Rename group chats
   - Retrieve chat message history with filtering and pagination
   - Send messages to existing chats
   - Edit previously sent chat messages
@@ -201,6 +202,7 @@ npm run build && node dist/index.js
 - `get_chat_messages` - Retrieve messages from a specific chat with pagination and filtering
 - `send_chat_message` - Send a message to a chat
 - `create_chat` - Create a new 1:1 or group chat
+- `rename_chat` - Rename a group chat (change its topic)
 - `update_chat_message` - Edit a previously sent chat message
 - `delete_chat_message` - Soft delete a chat message
 

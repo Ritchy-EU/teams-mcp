@@ -490,6 +490,57 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
     }
   );
 
+  // Rename a group chat
+  server.tool(
+    "rename_chat",
+    "Rename a group chat by changing its topic (title). Only group chats can be renamed — 1:1 (oneOnOne) chats have no topic. The topic is limited to 250 characters and cannot contain ':'.",
+    {
+      chatId: z.string().describe("Chat ID of the group chat to rename"),
+      topic: z
+        .string()
+        .min(1)
+        .max(250)
+        .describe("New chat topic (title), up to 250 characters; ':' is not allowed"),
+    },
+    async ({ chatId, topic }) => {
+      try {
+        if (topic.includes(":")) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Error: Chat topic cannot contain ':' (not allowed by Microsoft Graph).",
+              },
+            ],
+          };
+        }
+
+        const client = await graphService.getClient();
+
+        await client.api(`/chats/${chatId}`).patch({ topic });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `✅ Chat renamed successfully. New topic: "${topic}"`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Failed to rename chat: ${errorMessage}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
   // Update/Edit a chat message
   server.tool(
     "update_chat_message",
@@ -716,8 +767,7 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
 
         // 1. Extract hosted content IDs from message body HTML (inline images)
         const bodyContent = message.body?.content || "";
-        const hostedContentRegex =
-          /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value|itemid="([^"]+)"/gi;
+        const hostedContentRegex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value|itemid="([^"]+)"/gi;
         let match: RegExpExecArray | null;
 
         // biome-ignore lint/suspicious/noAssignInExpressions: needed for regex extraction
@@ -793,9 +843,7 @@ export function registerChatTools(server: McpServer, graphService: IGraphService
             if (item.type === "hostedContent") {
               // Download hosted content (inline images)
               const response = await client
-                .api(
-                  `/chats/${chatId}/messages/${messageId}/hostedContents/${item.id}/$value`
-                )
+                .api(`/chats/${chatId}/messages/${messageId}/hostedContents/${item.id}/$value`)
                 .responseType("arraybuffer" as any)
                 .get();
               buffer = Buffer.from(response as ArrayBuffer);

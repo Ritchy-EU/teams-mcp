@@ -395,6 +395,49 @@ export function registerChatTools(server, graphService) {
             };
         }
     });
+    // Rename a group chat
+    server.tool("rename_chat", "Rename a group chat by changing its topic (title). Only group chats can be renamed — 1:1 (oneOnOne) chats have no topic. The topic is limited to 250 characters and cannot contain ':'.", {
+        chatId: z.string().describe("Chat ID of the group chat to rename"),
+        topic: z
+            .string()
+            .min(1)
+            .max(250)
+            .describe("New chat topic (title), up to 250 characters; ':' is not allowed"),
+    }, async ({ chatId, topic }) => {
+        try {
+            if (topic.includes(":")) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "❌ Error: Chat topic cannot contain ':' (not allowed by Microsoft Graph).",
+                        },
+                    ],
+                };
+            }
+            const client = await graphService.getClient();
+            await client.api(`/chats/${chatId}`).patch({ topic });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `✅ Chat renamed successfully. New topic: "${topic}"`,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `❌ Failed to rename chat: ${errorMessage}`,
+                    },
+                ],
+            };
+        }
+    });
     // Update/Edit a chat message
     server.tool("update_chat_message", "Update (edit) a chat message that was previously sent. Only the message sender can update their own messages. Supports updating content with text or Markdown formatting, mentions, and importance levels.", {
         chatId: z.string().describe("Chat ID"),

@@ -29,7 +29,7 @@ describe("Chat Tools", () => {
     it("should register all chat tools", () => {
       registerChatTools(mockServer, mockGraphService);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(7);
+      expect(mockServer.tool).toHaveBeenCalledTimes(8);
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chats",
         expect.any(String),
@@ -50,6 +50,12 @@ describe("Chat Tools", () => {
       );
       expect(mockServer.tool).toHaveBeenCalledWith(
         "create_chat",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "rename_chat",
         expect.any(String),
         expect.any(Object),
         expect.any(Function)
@@ -1118,6 +1124,60 @@ describe("Chat Tools", () => {
       });
 
       expect(result.content[0].text).toBe("❌ Error: Failed to create chat");
+    });
+  });
+
+  describe("rename_chat", () => {
+    let renameChatHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService);
+      const call = vi.mocked(mockServer.tool).mock.calls.find(([name]) => name === "rename_chat");
+      renameChatHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should rename a group chat", async () => {
+      const mockApiChain = {
+        patch: vi.fn().mockResolvedValue({ id: "groupchat123", topic: "New Topic" }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await renameChatHandler({
+        chatId: "groupchat123",
+        topic: "New Topic",
+      });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/groupchat123");
+      expect(mockApiChain.patch).toHaveBeenCalledWith({ topic: "New Topic" });
+      expect(result.content[0].text).toBe('✅ Chat renamed successfully. New topic: "New Topic"');
+    });
+
+    it("should reject topics containing ':'", async () => {
+      const result = await renameChatHandler({
+        chatId: "groupchat123",
+        topic: "Project: Alpha",
+      });
+
+      expect(result.content[0].text).toBe(
+        "❌ Error: Chat topic cannot contain ':' (not allowed by Microsoft Graph)."
+      );
+      expect(mockClient.api).not.toHaveBeenCalled();
+    });
+
+    it("should handle rename errors", async () => {
+      const mockApiChain = {
+        patch: vi.fn().mockRejectedValue(new Error("Cannot update topic for oneOnOne chat")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await renameChatHandler({
+        chatId: "oneonone123",
+        topic: "New Topic",
+      });
+
+      expect(result.content[0].text).toBe(
+        "❌ Failed to rename chat: Cannot update topic for oneOnOne chat"
+      );
     });
   });
 });
