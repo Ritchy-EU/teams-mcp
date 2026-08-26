@@ -1125,6 +1125,89 @@ describe("Chat Tools", () => {
 
       expect(result.content[0].text).toBe("❌ Error: Failed to create chat");
     });
+
+    it("should exclude the creator's own email from userEmails", async () => {
+      const mockMe = {
+        id: "currentuser123",
+        mail: "Me@Example.com",
+        userPrincipalName: "me@example.com",
+      };
+      const mockUser = { id: "otheruser456" };
+      const mockNewChat = { id: "newchat789" };
+
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValueOnce(mockMe).mockResolvedValueOnce(mockUser),
+        post: vi.fn().mockResolvedValue(mockNewChat),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await createChatHandler({
+        userEmails: ["ME@example.com", "other@example.com"],
+      });
+
+      // Only /me, one user lookup and /chats — the creator is not looked up
+      expect(mockClient.api).toHaveBeenCalledTimes(3);
+      expect(mockClient.api).toHaveBeenCalledWith("/users/other@example.com");
+      expect(mockApiChain.post).toHaveBeenCalledWith({
+        chatType: "oneOnOne",
+        members: [
+          {
+            "@odata.type": "#microsoft.graph.aadUserConversationMember",
+            user: { id: "currentuser123" },
+            roles: ["owner"],
+          },
+          {
+            "@odata.type": "#microsoft.graph.aadUserConversationMember",
+            user: { id: "otheruser456" },
+            roles: ["owner"],
+          },
+        ],
+      });
+      expect(result.content[0].text).toBe("✅ Chat created successfully. Chat ID: newchat789");
+    });
+
+    it("should dedupe repeated emails in userEmails", async () => {
+      const mockMe = { id: "currentuser123" };
+      const mockUser = { id: "otheruser456" };
+      const mockNewChat = { id: "newchat789" };
+
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValueOnce(mockMe).mockResolvedValueOnce(mockUser),
+        post: vi.fn().mockResolvedValue(mockNewChat),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      await createChatHandler({
+        userEmails: ["other@example.com", "Other@Example.com"],
+      });
+
+      // One lookup for the deduped address; resulting chat is 1:1
+      expect(mockClient.api).toHaveBeenCalledTimes(3);
+      const postCall = mockApiChain.post.mock.calls[0][0];
+      expect(postCall.chatType).toBe("oneOnOne");
+      expect(postCall.members).toHaveLength(2);
+    });
+
+    it("should fail when userEmails contains only the creator", async () => {
+      const mockMe = {
+        id: "currentuser123",
+        mail: "me@example.com",
+        userPrincipalName: "me@example.com",
+      };
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValueOnce(mockMe),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await createChatHandler({
+        userEmails: ["me@example.com"],
+      });
+
+      expect(result.content[0].text).toBe(
+        "❌ Error: No participants besides you — add at least one other user."
+      );
+      expect(mockClient.api).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("rename_chat", () => {

@@ -335,7 +335,7 @@ export function registerChatTools(server, graphService) {
         }
     });
     // Create new chat (1:1 or group)
-    server.tool("create_chat", "Create a new chat conversation. Can be a 1:1 chat (with one other user) or a group chat (with multiple users). Group chats can optionally have a topic.", {
+    server.tool("create_chat", "Create a new chat conversation. Can be a 1:1 chat (with one other user) or a group chat (with multiple users). Group chats can optionally have a topic. The current user is added automatically and must not be included in userEmails.", {
         userEmails: z.array(z.string()).describe("Array of user email addresses to add to chat"),
         topic: z.string().optional().describe("Chat topic (for group chats)"),
     }, async ({ userEmails, topic }) => {
@@ -343,6 +343,23 @@ export function registerChatTools(server, graphService) {
             const client = await graphService.getClient();
             // Get current user ID
             const me = (await client.api("/me").get());
+            // The creator is added automatically below; drop their own address and
+            // any repeats from userEmails, or Graph rejects the request with
+            // "Duplicate chat members is specified in the request body".
+            const ownAddresses = [me?.mail, me?.userPrincipalName]
+                .filter((a) => !!a)
+                .map((a) => a.toLowerCase());
+            const uniqueEmails = [...new Set(userEmails.map((e) => e.toLowerCase()))].filter((email) => !ownAddresses.includes(email));
+            if (uniqueEmails.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "❌ Error: No participants besides you — add at least one other user.",
+                        },
+                    ],
+                };
+            }
             // Create members array
             const members = [
                 {
@@ -356,7 +373,7 @@ export function registerChatTools(server, graphService) {
             // Add other users as members.
             // Graph only accepts the "owner" role when creating a chat — "member"
             // is rejected with "The passed-in role 'member' is not supported".
-            for (const email of userEmails) {
+            for (const email of uniqueEmails) {
                 const user = (await client.api(`/users/${email}`).get());
                 members.push({
                     "@odata.type": "#microsoft.graph.aadUserConversationMember",
@@ -367,10 +384,10 @@ export function registerChatTools(server, graphService) {
                 });
             }
             const chatData = {
-                chatType: userEmails.length === 1 ? "oneOnOne" : "group",
+                chatType: uniqueEmails.length === 1 ? "oneOnOne" : "group",
                 members,
             };
-            if (topic && userEmails.length > 1) {
+            if (topic && uniqueEmails.length > 1) {
                 chatData.topic = topic;
             }
             const newChat = (await client.api("/chats").post(chatData));
