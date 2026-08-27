@@ -39,7 +39,7 @@ describe("Chat Tools", () => {
     it("should register all chat tools", () => {
       registerChatTools(mockServer, mockGraphService, false);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(15);
+      expect(mockServer.tool).toHaveBeenCalledTimes(19);
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chats",
         expect.any(String),
@@ -126,6 +126,30 @@ describe("Chat Tools", () => {
       );
       expect(mockServer.tool).toHaveBeenCalledWith(
         "leave_chat",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "pin_chat_message",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "unpin_chat_message",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "hide_chat",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "unhide_chat",
         expect.any(String),
         expect.any(Object),
         expect.any(Function)
@@ -1987,6 +2011,192 @@ describe("Chat Tools", () => {
       const result = await leaveChatHandler({ chatId: "chat123" });
 
       expect(result.content[0].text).toBe("❌ Failed to leave chat: Network error");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("pin_chat_message", () => {
+    let pinHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "pin_chat_message");
+      pinHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should pin a message", async () => {
+      const mockApiChain = { post: vi.fn().mockResolvedValue({ id: "msg1" }) };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await pinHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/chat123/pinnedMessages");
+      expect(mockApiChain.post).toHaveBeenCalledWith({
+        "message@odata.bind": "https://graph.microsoft.com/v1.0/chats/chat123/messages/msg1",
+      });
+      expect(result.content[0].text).toBe("✅ Message msg1 pinned.");
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = { post: vi.fn().mockRejectedValue(new Error("Forbidden")) };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await pinHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(result.content[0].text).toBe("❌ Failed to pin message: Forbidden");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("unpin_chat_message", () => {
+    let unpinHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "unpin_chat_message");
+      unpinHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should unpin a message", async () => {
+      const deleteMock = vi.fn().mockResolvedValue(undefined);
+      mockClient.api = vi.fn().mockReturnValue({ delete: deleteMock });
+
+      const result = await unpinHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/chat123/pinnedMessages/msg1");
+      expect(deleteMock).toHaveBeenCalled();
+      expect(result.content[0].text).toBe("✅ Message msg1 unpinned.");
+    });
+
+    it("should handle errors", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        delete: vi.fn().mockRejectedValue(new Error("Not found")),
+      });
+
+      const result = await unpinHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(result.content[0].text).toBe("❌ Failed to unpin message: Not found");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("hide_chat", () => {
+    let hideHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi.mocked(mockServer.tool).mock.calls.find(([name]) => name === "hide_chat");
+      hideHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should hide the chat for the current user", async () => {
+      const postMock = vi.fn().mockResolvedValue(undefined);
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me1" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              value: [{ id: "memMe", userId: "me1", tenantId: "tenant-1" }],
+            }),
+          };
+        }
+        if (path === "/chats/chat123/hideForUser") {
+          return { post: postMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await hideHandler({ chatId: "chat123" });
+
+      expect(postMock).toHaveBeenCalledWith({
+        user: { id: "me1", tenantId: "tenant-1" },
+      });
+      expect(result.content[0].text).toBe(
+        "✅ Chat hidden from your chat list. It reappears on new activity."
+      );
+    });
+
+    it("should report when not a member", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me1" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({ value: [{ id: "mem2", userId: "u2" }] }),
+          };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await hideHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("❌ You are not a member of this chat.");
+      expect(result.isError).toBe(true);
+    });
+
+    it("should handle errors", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockRejectedValue(new Error("Network error")),
+      });
+
+      const result = await hideHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("❌ Failed to hide chat: Network error");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("unhide_chat", () => {
+    let unhideHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi.mocked(mockServer.tool).mock.calls.find(([name]) => name === "unhide_chat");
+      unhideHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should unhide the chat for the current user", async () => {
+      const postMock = vi.fn().mockResolvedValue(undefined);
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me1" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              value: [{ id: "memMe", userId: "me1", tenantId: "tenant-1" }],
+            }),
+          };
+        }
+        if (path === "/chats/chat123/unhideForUser") {
+          return { post: postMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await unhideHandler({ chatId: "chat123" });
+
+      expect(postMock).toHaveBeenCalledWith({
+        user: { id: "me1", tenantId: "tenant-1" },
+      });
+      expect(result.content[0].text).toBe("✅ Chat is visible in your chat list again.");
+    });
+
+    it("should handle errors", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockRejectedValue(new Error("Network error")),
+      });
+
+      const result = await unhideHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("❌ Failed to unhide chat: Network error");
       expect(result.isError).toBe(true);
     });
   });

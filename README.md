@@ -223,6 +223,8 @@ npm run build && node dist/index.js
 - `add_chat_member` - Add a user to a group chat (with history visibility control)
 - `remove_chat_member` - Remove a user from a group chat
 - `leave_chat` - Leave a group chat
+- `pin_chat_message` / `unpin_chat_message` - Pin or unpin a message in a chat
+- `hide_chat` / `unhide_chat` - Hide or unhide a chat in your own chat list
 
 #### Media Operations
 - `download_message_hosted_content` - Download hosted content (images, files) from messages

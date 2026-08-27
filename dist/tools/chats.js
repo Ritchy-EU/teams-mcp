@@ -1116,5 +1116,164 @@ export function registerChatTools(server, graphService, readOnly) {
             };
         }
     });
+    // Pin a message in a chat
+    server.tool("pin_chat_message", "Pin a message in a chat so it is shown at the top of the conversation for all members.", {
+        chatId: z.string().describe("Chat ID"),
+        messageId: z.string().describe("Message ID to pin"),
+    }, async ({ chatId, messageId }) => {
+        try {
+            const client = await graphService.getClient();
+            await client.api(`/chats/${chatId}/pinnedMessages`).post({
+                "message@odata.bind": `https://graph.microsoft.com/v1.0/chats/${chatId}/messages/${messageId}`,
+            });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `✅ Message ${messageId} pinned.`,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `❌ Failed to pin message: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+    // Unpin a message in a chat
+    server.tool("unpin_chat_message", "Unpin a previously pinned message in a chat.", {
+        chatId: z.string().describe("Chat ID"),
+        messageId: z.string().describe("Message ID to unpin"),
+    }, async ({ chatId, messageId }) => {
+        try {
+            const client = await graphService.getClient();
+            // Graph uses the message id as the pinned-item id.
+            await client.api(`/chats/${chatId}/pinnedMessages/${messageId}`).delete();
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `✅ Message ${messageId} unpinned.`,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `❌ Failed to unpin message: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+    // Hide a chat from the current user's chat list
+    server.tool("hide_chat", "Hide a chat from your own chat list (does not leave or delete the chat, and does not affect other members). The chat reappears automatically when there is new activity.", {
+        chatId: z.string().describe("Chat ID to hide"),
+    }, async ({ chatId }) => {
+        try {
+            const client = await graphService.getClient();
+            // hideForUser requires the user's id and tenantId; take them from our
+            // own membership entry in the chat.
+            const me = (await client.api("/me").get());
+            const response = (await client
+                .api(`/chats/${chatId}/members`)
+                .get());
+            const own = response?.value?.find((member) => member.userId === me?.id);
+            if (!own) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "❌ You are not a member of this chat.",
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+            await client.api(`/chats/${chatId}/hideForUser`).post({
+                user: { id: me?.id, tenantId: own.tenantId },
+            });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "✅ Chat hidden from your chat list. It reappears on new activity.",
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `❌ Failed to hide chat: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+    // Unhide a chat in the current user's chat list
+    server.tool("unhide_chat", "Unhide a previously hidden chat in your own chat list.", {
+        chatId: z.string().describe("Chat ID to unhide"),
+    }, async ({ chatId }) => {
+        try {
+            const client = await graphService.getClient();
+            const me = (await client.api("/me").get());
+            const response = (await client
+                .api(`/chats/${chatId}/members`)
+                .get());
+            const own = response?.value?.find((member) => member.userId === me?.id);
+            if (!own) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "❌ You are not a member of this chat.",
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+            await client.api(`/chats/${chatId}/unhideForUser`).post({
+                user: { id: me?.id, tenantId: own.tenantId },
+            });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "✅ Chat is visible in your chat list again.",
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `❌ Failed to unhide chat: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
 }
 //# sourceMappingURL=chats.js.map
