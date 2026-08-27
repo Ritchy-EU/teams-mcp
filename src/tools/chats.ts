@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { IGraphService } from "../services/graph.js";
 import type {
+  AadUserConversationMember,
   Chat,
   ChatMessage,
   ChatMessageReaction,
@@ -540,6 +541,63 @@ export function registerChatTools(
               text: `❌ Error: ${errorMessage}`,
             },
           ],
+        };
+      }
+    }
+  );
+
+  // List members of a chat
+  server.tool(
+    "list_chat_members",
+    "List all members of a chat with their membership IDs, names, emails and roles.",
+    {
+      chatId: z.string().describe("Chat ID"),
+    },
+    async ({ chatId }) => {
+      try {
+        const client = await graphService.getClient();
+
+        const response = (await client
+          .api(`/chats/${chatId}/members`)
+          .get()) as GraphApiResponse<AadUserConversationMember>;
+
+        if (!response?.value?.length) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No members found in this chat.",
+              },
+            ],
+          };
+        }
+
+        const members = response.value.map((member) => ({
+          membershipId: member.id,
+          displayName: member.displayName,
+          email: member.email,
+          userId: member.userId,
+          roles: member.roles,
+        }));
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(members, null, 2),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to list chat members: ${errorMessage}`,
+            },
+          ],
+          isError: true,
         };
       }
     }
@@ -1145,6 +1203,184 @@ export function registerChatTools(
             {
               type: "text" as const,
               text: `❌ Failed to send file: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Add a member to a group chat
+  server.tool(
+    "add_chat_member",
+    "Add a user to a group chat. Optionally controls how much of the existing chat history the new member can see (default: all of it).",
+    {
+      chatId: z.string().describe("Chat ID of the group chat"),
+      userEmail: z.string().describe("Email address of the user to add"),
+      shareHistory: z
+        .enum(["all", "none"])
+        .optional()
+        .describe("How much chat history the new member sees (default: all)"),
+      shareHistorySince: z
+        .string()
+        .optional()
+        .describe("Share history starting from this ISO datetime (overrides shareHistory)"),
+    },
+    async ({ chatId, userEmail, shareHistory = "all", shareHistorySince }) => {
+      try {
+        const client = await graphService.getClient();
+
+        const user = (await client.api(`/users/${userEmail}`).get()) as User;
+
+        // This endpoint requires the user@odata.bind reference format.
+        // Omitting visibleHistoryStartDateTime means "share no history";
+        // 0001-01-01T00:00:00Z is Graph's marker for "share everything".
+        const memberPayload: Record<string, unknown> = {
+          "@odata.type": "#microsoft.graph.aadUserConversationMember",
+          roles: ["owner"],
+          "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${user?.id}')`,
+        };
+        if (shareHistorySince) {
+          memberPayload.visibleHistoryStartDateTime = shareHistorySince;
+        } else if (shareHistory === "all") {
+          memberPayload.visibleHistoryStartDateTime = "0001-01-01T00:00:00Z";
+        }
+
+        await client.api(`/chats/${chatId}/members`).post(memberPayload);
+
+        const historyNote = shareHistorySince
+          ? `history visible since ${shareHistorySince}`
+          : shareHistory === "all"
+            ? "full history visible"
+            : "no history visible";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `✅ ${userEmail} added to chat (${historyNote}).`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to add chat member: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Remove a member from a group chat
+  server.tool(
+    "remove_chat_member",
+    "Remove a user from a group chat.",
+    {
+      chatId: z.string().describe("Chat ID of the group chat"),
+      userEmail: z.string().describe("Email address of the member to remove"),
+    },
+    async ({ chatId, userEmail }) => {
+      try {
+        const client = await graphService.getClient();
+
+        // Resolve the user and match members by user id — a member's email
+        // can differ from the address the caller knows.
+        const user = (await client.api(`/users/${userEmail}`).get()) as User;
+
+        const response = (await client
+          .api(`/chats/${chatId}/members`)
+          .get()) as GraphApiResponse<AadUserConversationMember>;
+        const target = response?.value?.find((member) => member.userId === user?.id);
+
+        if (!target?.id) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ ${userEmail} is not a member of this chat.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        await client.api(`/chats/${chatId}/members/${target.id}`).delete();
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `✅ ${userEmail} removed from chat.`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to remove chat member: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Leave a group chat
+  server.tool(
+    "leave_chat",
+    "Leave a group chat (removes the current user from the chat).",
+    {
+      chatId: z.string().describe("Chat ID of the group chat to leave"),
+    },
+    async ({ chatId }) => {
+      try {
+        const client = await graphService.getClient();
+
+        const me = (await client.api("/me").get()) as User;
+        const response = (await client
+          .api(`/chats/${chatId}/members`)
+          .get()) as GraphApiResponse<AadUserConversationMember>;
+        const own = response?.value?.find((member) => member.userId === me?.id);
+
+        if (!own?.id) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "❌ You are not a member of this chat.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        await client.api(`/chats/${chatId}/members/${own.id}`).delete();
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "✅ You left the chat.",
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to leave chat: ${errorMessage}`,
             },
           ],
           isError: true,

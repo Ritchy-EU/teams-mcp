@@ -1,4 +1,5 @@
 import type {
+  AadUserConversationMember,
   Channel,
   ChannelMembershipType,
   Chat,
@@ -20,6 +21,7 @@ import type {
 
 // Re-export Microsoft Graph types we use
 export type {
+  AadUserConversationMember,
   User,
   Chat,
   Team,

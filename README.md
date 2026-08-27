@@ -50,6 +50,7 @@ To use this MCP server in Cursor/Claude/VS Code, add the following configuration
   - List user's chats
   - Create new 1:1 or group conversations
   - Rename group chats
+  - Manage group chat members: list, add (with history visibility control), remove, leave
   - Retrieve chat message history with filtering and pagination
   - Send messages to existing chats
   - Edit previously sent chat messages
@@ -161,6 +162,7 @@ npm run auth
 - `ChannelMessage.ReadWrite` - Edit and delete channel messages
 - `Chat.Read` - Read chat messages
 - `Chat.ReadWrite` - Create and manage chats (including edit/delete messages)
+- `ChatMember.ReadWrite` - Add and remove chat members
 - `Mail.Read` - Required for Microsoft Search API
 - `Calendars.Read` - Required for Microsoft Search API
 - `Files.Read.All` - Required for Microsoft Search API
@@ -217,6 +219,10 @@ npm run build && node dist/index.js
 - `delete_chat_message` - Soft delete a chat message
 - `send_file_to_chat` - Upload a local file and send it as a chat message
 - `set_chat_message_reaction` / `unset_chat_message_reaction` - Add or remove reactions
+- `list_chat_members` - List chat members with membership IDs and roles
+- `add_chat_member` - Add a user to a group chat (with history visibility control)
+- `remove_chat_member` - Remove a user from a group chat
+- `leave_chat` - Leave a group chat
 
 #### Media Operations
 - `download_message_hosted_content` - Download hosted content (images, files) from messages

@@ -49,6 +49,7 @@ export const FULL_SCOPES = [
   "ChannelMessage.Send",
   "ChannelMessage.ReadWrite",
   "Chat.ReadWrite",
+  "ChatMember.ReadWrite",
   "Files.ReadWrite.All",
 ];
 

@@ -39,7 +39,7 @@ describe("Chat Tools", () => {
     it("should register all chat tools", () => {
       registerChatTools(mockServer, mockGraphService, false);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(11);
+      expect(mockServer.tool).toHaveBeenCalledTimes(15);
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chats",
         expect.any(String),
@@ -106,12 +106,42 @@ describe("Chat Tools", () => {
         expect.any(Object),
         expect.any(Function)
       );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "list_chat_members",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "add_chat_member",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "remove_chat_member",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "leave_chat",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
     });
 
     it("should register only read-only chat tools when readOnly is true", () => {
       registerChatTools(mockServer, mockGraphService, true);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(3);
+      expect(mockServer.tool).toHaveBeenCalledTimes(4);
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "list_chat_members",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chats",
         expect.any(String),
@@ -1653,6 +1683,310 @@ describe("Chat Tools", () => {
       });
 
       expect(result.content[0].text).toBe("❌ Failed to send file: Permission denied");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("list_chat_members", () => {
+    let listMembersHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "list_chat_members");
+      listMembersHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should list members with membership ids", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValue({
+          value: [
+            {
+              id: "mem1",
+              displayName: "User One",
+              email: "one@example.com",
+              userId: "u1",
+              roles: ["owner"],
+            },
+            {
+              id: "mem2",
+              displayName: "User Two",
+              email: "two@example.com",
+              userId: "u2",
+              roles: ["owner"],
+            },
+          ],
+        }),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await listMembersHandler({ chatId: "chat123" });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/chat123/members");
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toEqual({
+        membershipId: "mem1",
+        displayName: "User One",
+        email: "one@example.com",
+        userId: "u1",
+        roles: ["owner"],
+      });
+    });
+
+    it("should handle empty member list", async () => {
+      const mockApiChain = { get: vi.fn().mockResolvedValue({ value: [] }) };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await listMembersHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("No members found in this chat.");
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = { get: vi.fn().mockRejectedValue(new Error("Forbidden")) };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await listMembersHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("❌ Failed to list chat members: Forbidden");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("add_chat_member", () => {
+    let addMemberHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "add_chat_member");
+      addMemberHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should add a member with full history by default", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValue({ id: "user123" }),
+        post: vi.fn().mockResolvedValue({}),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await addMemberHandler({
+        chatId: "chat123",
+        userEmail: "new@example.com",
+      });
+
+      expect(mockClient.api).toHaveBeenCalledWith("/users/new@example.com");
+      expect(mockClient.api).toHaveBeenCalledWith("/chats/chat123/members");
+      expect(mockApiChain.post).toHaveBeenCalledWith({
+        "@odata.type": "#microsoft.graph.aadUserConversationMember",
+        roles: ["owner"],
+        "user@odata.bind": "https://graph.microsoft.com/v1.0/users('user123')",
+        visibleHistoryStartDateTime: "0001-01-01T00:00:00Z",
+      });
+      expect(result.content[0].text).toBe(
+        "✅ new@example.com added to chat (full history visible)."
+      );
+    });
+
+    it("should omit history when shareHistory is none", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValue({ id: "user123" }),
+        post: vi.fn().mockResolvedValue({}),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await addMemberHandler({
+        chatId: "chat123",
+        userEmail: "new@example.com",
+        shareHistory: "none",
+      });
+
+      const payload = mockApiChain.post.mock.calls[0][0];
+      expect(payload).not.toHaveProperty("visibleHistoryStartDateTime");
+      expect(result.content[0].text).toBe("✅ new@example.com added to chat (no history visible).");
+    });
+
+    it("should use explicit shareHistorySince", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockResolvedValue({ id: "user123" }),
+        post: vi.fn().mockResolvedValue({}),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      await addMemberHandler({
+        chatId: "chat123",
+        userEmail: "new@example.com",
+        shareHistorySince: "2026-08-01T00:00:00Z",
+      });
+
+      const payload = mockApiChain.post.mock.calls[0][0];
+      expect(payload.visibleHistoryStartDateTime).toBe("2026-08-01T00:00:00Z");
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockRejectedValue(new Error("User not found")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await addMemberHandler({
+        chatId: "chat123",
+        userEmail: "ghost@example.com",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to add chat member: User not found");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("remove_chat_member", () => {
+    let removeMemberHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "remove_chat_member");
+      removeMemberHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should remove a member by email", async () => {
+      const deleteMock = vi.fn().mockResolvedValue(undefined);
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/users/two@example.com") {
+          return { get: vi.fn().mockResolvedValue({ id: "u2" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              value: [
+                { id: "mem1", userId: "u1" },
+                { id: "mem2", userId: "u2" },
+              ],
+            }),
+          };
+        }
+        if (path === "/chats/chat123/members/mem2") {
+          return { delete: deleteMock };
+        }
+        return { get: vi.fn(), delete: vi.fn() };
+      });
+
+      const result = await removeMemberHandler({
+        chatId: "chat123",
+        userEmail: "two@example.com",
+      });
+
+      expect(deleteMock).toHaveBeenCalled();
+      expect(result.content[0].text).toBe("✅ two@example.com removed from chat.");
+    });
+
+    it("should report when the user is not a member", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/users/ghost@example.com") {
+          return { get: vi.fn().mockResolvedValue({ id: "ghost" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({ value: [{ id: "mem1", userId: "u1" }] }),
+          };
+        }
+        return { get: vi.fn(), delete: vi.fn() };
+      });
+
+      const result = await removeMemberHandler({
+        chatId: "chat123",
+        userEmail: "ghost@example.com",
+      });
+
+      expect(result.content[0].text).toBe("❌ ghost@example.com is not a member of this chat.");
+      expect(result.isError).toBe(true);
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockRejectedValue(new Error("Forbidden")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await removeMemberHandler({
+        chatId: "chat123",
+        userEmail: "two@example.com",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to remove chat member: Forbidden");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("leave_chat", () => {
+    let leaveChatHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi.mocked(mockServer.tool).mock.calls.find(([name]) => name === "leave_chat");
+      leaveChatHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should remove own membership", async () => {
+      const deleteMock = vi.fn().mockResolvedValue(undefined);
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me1" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              value: [
+                { id: "memMe", userId: "me1" },
+                { id: "mem2", userId: "u2" },
+              ],
+            }),
+          };
+        }
+        if (path === "/chats/chat123/members/memMe") {
+          return { delete: deleteMock };
+        }
+        return { get: vi.fn(), delete: vi.fn() };
+      });
+
+      const result = await leaveChatHandler({ chatId: "chat123" });
+
+      expect(deleteMock).toHaveBeenCalled();
+      expect(result.content[0].text).toBe("✅ You left the chat.");
+    });
+
+    it("should report when not a member", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me1" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({ value: [{ id: "mem2", userId: "u2" }] }),
+          };
+        }
+        return { get: vi.fn(), delete: vi.fn() };
+      });
+
+      const result = await leaveChatHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("❌ You are not a member of this chat.");
+      expect(result.isError).toBe(true);
+    });
+
+    it("should handle errors", async () => {
+      const mockApiChain = {
+        get: vi.fn().mockRejectedValue(new Error("Network error")),
+      };
+      mockClient.api = vi.fn().mockReturnValue(mockApiChain);
+
+      const result = await leaveChatHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toBe("❌ Failed to leave chat: Network error");
       expect(result.isError).toBe(true);
     });
   });
