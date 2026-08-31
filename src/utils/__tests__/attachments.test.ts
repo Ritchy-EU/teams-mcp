@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphService } from "../../services/graph.js";
 import { server } from "../../test-utils/setup.js";
 import {
+  collectMessageAttachments,
   extractAttachmentSummaries,
+  extractHostedContentIds,
   getFileExtensionFromMimeType,
   imageUrlToBase64,
   isValidImageType,
@@ -330,5 +332,48 @@ describe("Attachment Utilities", () => {
 
       consoleSpy.mockRestore();
     });
+  });
+});
+
+describe("extractHostedContentIds", () => {
+  it("should extract and dedupe hosted content ids from message HTML", () => {
+    const html =
+      '<p><img src="https://graph.microsoft.com/v1.0/chats/19:x@thread.v2/messages/1/hostedContents/aWQ9AAA=/$value" alt="image"></p>' +
+      '<p><img src="https://graph.microsoft.com/v1.0/chats/19:x@thread.v2/messages/1/hostedContents/aWQ9AAA=/$value"></p>' +
+      '<p><img src="https://graph.microsoft.com/v1.0/chats/19:x@thread.v2/messages/1/hostedContents/aWQ9BBB=/$value"></p>';
+
+    expect(extractHostedContentIds(html)).toEqual(["aWQ9AAA=", "aWQ9BBB="]);
+  });
+
+  it("should return an empty array when no hosted content is present", () => {
+    expect(extractHostedContentIds("<p>Just text</p>")).toEqual([]);
+  });
+});
+
+describe("collectMessageAttachments", () => {
+  it("should merge file attachments and inline images", () => {
+    const attachments = [
+      { id: "att1", name: "report.pdf", contentType: "reference", contentUrl: "https://x/y.pdf" },
+    ];
+    const html =
+      '<img src="https://graph.microsoft.com/v1.0/chats/19:x@thread.v2/messages/1/hostedContents/aWQ9CCC=/$value">';
+
+    const result = collectMessageAttachments(attachments, html);
+
+    expect(result).toEqual([
+      {
+        id: "att1",
+        name: "report.pdf",
+        contentType: "reference",
+        contentUrl: "https://x/y.pdf",
+        thumbnailUrl: undefined,
+      },
+      { id: "aWQ9CCC=", contentType: "hostedContent" },
+    ]);
+  });
+
+  it("should return undefined when there is nothing to report", () => {
+    expect(collectMessageAttachments([], "<p>hi</p>")).toBeUndefined();
+    expect(collectMessageAttachments(null, null)).toBeUndefined();
   });
 });

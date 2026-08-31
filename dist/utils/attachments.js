@@ -110,4 +110,29 @@ export function extractAttachmentSummaries(attachments) {
     }
     return summaries.length > 0 ? summaries : undefined;
 }
+/** Extract hosted content ids (inline images) referenced in a message's HTML body. */
+export function extractHostedContentIds(html) {
+    const regex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value/g;
+    const ids = new Set();
+    let match = regex.exec(html);
+    while (match !== null) {
+        ids.add(match[1]);
+        match = regex.exec(html);
+    }
+    return [...ids];
+}
+/**
+ * Collect all downloadable content of a message as attachment summaries:
+ * regular file/card attachments plus inline images (hosted content), the
+ * latter marked with contentType "hostedContent" so callers know to fetch
+ * them as bytes rather than by URL.
+ */
+export function collectMessageAttachments(attachments, bodyHtml) {
+    const files = extractAttachmentSummaries(attachments) ?? [];
+    const inline = bodyHtml
+        ? extractHostedContentIds(bodyHtml).map((id) => ({ id, contentType: "hostedContent" }))
+        : [];
+    const all = [...files, ...inline];
+    return all.length > 0 ? all : undefined;
+}
 //# sourceMappingURL=attachments.js.map

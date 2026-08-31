@@ -41,4 +41,13 @@ export declare function imageUrlToBase64(imageUrl: string): Promise<{
  * Returns undefined if there are no meaningful attachments to report.
  */
 export declare function extractAttachmentSummaries(attachments: ChatMessageAttachment[] | null | undefined): AttachmentSummary[] | undefined;
+/** Extract hosted content ids (inline images) referenced in a message's HTML body. */
+export declare function extractHostedContentIds(html: string): string[];
+/**
+ * Collect all downloadable content of a message as attachment summaries:
+ * regular file/card attachments plus inline images (hosted content), the
+ * latter marked with contentType "hostedContent" so callers know to fetch
+ * them as bytes rather than by URL.
+ */
+export declare function collectMessageAttachments(attachments: ChatMessageAttachment[] | null | undefined, bodyHtml: string | null | undefined): AttachmentSummary[] | undefined;
 //# sourceMappingURL=attachments.d.ts.map

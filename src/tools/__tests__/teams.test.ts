@@ -259,6 +259,7 @@ describe("Teams Tools", () => {
                     id: mockChatMessage.id,
                     content: mockChatMessage.body?.content,
                     from: mockChatMessage.from?.user?.displayName,
+                    fromId: mockChatMessage.from?.user?.id,
                     createdDateTime: mockChatMessage.createdDateTime,
                     importance: mockChatMessage.importance,
                   },
@@ -1604,9 +1605,11 @@ describe("Teams Tools", () => {
         }
         if (path.startsWith("/shares/u!")) {
           return {
-            get: vi.fn().mockResolvedValue({
-              size: 4096,
-              "@microsoft.graph.downloadUrl": "https://download.spo.com/tempauth-xyz",
+            header: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                size: 4096,
+                "@microsoft.graph.downloadUrl": "https://download.spo.com/tempauth-xyz",
+              }),
             }),
           };
         }

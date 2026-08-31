@@ -103,13 +103,18 @@ export interface ReactionSummary {
   reactionType?: string | undefined;
   displayName?: NullableOption<string> | undefined;
   createdDateTime?: string | undefined;
+  user?: { id?: string | undefined; displayName?: string | undefined } | undefined;
 }
 
 export interface MessageSummary {
   id?: string | undefined;
   content?: NullableOption<string> | undefined;
   from?: NullableOption<string> | undefined;
+  fromId?: string | undefined;
   createdDateTime?: NullableOption<string> | undefined;
+  lastEditedDateTime?: NullableOption<string> | undefined;
+  deletedDateTime?: NullableOption<string> | undefined;
+  messageType?: string | undefined;
   importance?: ChatMessageImportance | undefined;
   attachments?: AttachmentSummary[] | undefined;
   reactions?: ReactionSummary[] | undefined;

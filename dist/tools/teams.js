@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { extractAttachmentSummaries, imageUrlToBase64, isValidImageType, uploadImageAsHostedContent, } from "../utils/attachments.js";
+import { collectMessageAttachments, imageUrlToBase64, isValidImageType, uploadImageAsHostedContent, } from "../utils/attachments.js";
 import { detectContentType } from "../utils/content-type.js";
 import { buildFileAttachment, encodeShareUrl, escapeHtml, formatFileSize, resolveChannelDriveItem, uploadFileToChannel, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
@@ -138,13 +138,23 @@ export function registerTeamsTools(server, graphService, readOnly) {
                 id: message.id,
                 content: message.body?.content,
                 from: message.from?.user?.displayName,
+                fromId: message.from?.user?.id ?? undefined,
                 createdDateTime: message.createdDateTime,
+                lastEditedDateTime: message.lastEditedDateTime ?? undefined,
+                deletedDateTime: message.deletedDateTime ?? undefined,
+                messageType: message.messageType ?? undefined,
                 importance: message.importance,
-                attachments: extractAttachmentSummaries(message.attachments),
+                attachments: collectMessageAttachments(message.attachments, message.body?.content),
                 reactions: message.reactions?.map((r) => ({
                     reactionType: r.reactionType,
                     displayName: r.displayName,
                     createdDateTime: r.createdDateTime,
+                    user: r.user?.user
+                        ? {
+                            id: r.user.user.id ?? undefined,
+                            displayName: r.user.user.displayName ?? undefined,
+                        }
+                        : undefined,
                 })),
             }));
             // Sort messages by creation date (newest first) since API doesn't support orderby
@@ -382,13 +392,23 @@ export function registerTeamsTools(server, graphService, readOnly) {
                 id: reply.id,
                 content: reply.body?.content,
                 from: reply.from?.user?.displayName,
+                fromId: reply.from?.user?.id ?? undefined,
                 createdDateTime: reply.createdDateTime,
+                lastEditedDateTime: reply.lastEditedDateTime ?? undefined,
+                deletedDateTime: reply.deletedDateTime ?? undefined,
+                messageType: reply.messageType ?? undefined,
                 importance: reply.importance,
-                attachments: extractAttachmentSummaries(reply.attachments),
+                attachments: collectMessageAttachments(reply.attachments, reply.body?.content),
                 reactions: reply.reactions?.map((r) => ({
                     reactionType: r.reactionType,
                     displayName: r.displayName,
                     createdDateTime: r.createdDateTime,
+                    user: r.user?.user
+                        ? {
+                            id: r.user.user.id ?? undefined,
+                            displayName: r.user.user.displayName ?? undefined,
+                        }
+                        : undefined,
                 })),
             }));
             // Sort replies by creation date (oldest first for replies)
@@ -902,6 +922,7 @@ export function registerTeamsTools(server, graphService, readOnly) {
                 try {
                     const item = (await client
                         .api(`/shares/${encodeShareUrl(contentUrl)}/driveItem`)
+                        .header("Prefer", "redeemSharingLink")
                         .get());
                     results.push({
                         name: att.name,

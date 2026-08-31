@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { extractAttachmentSummaries } from "../utils/attachments.js";
+import { collectMessageAttachments, extractHostedContentIds } from "../utils/attachments.js";
 import { buildFileAttachment, createUploadSessionForChannel, createUploadSessionForChat, encodeShareUrl, escapeHtml, formatFileSize, resolveChatDriveItem, uploadFileToChat, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml } from "../utils/users.js";
@@ -115,14 +115,8 @@ export function registerChatTools(server, graphService, readOnly) {
             }
             const sortDirection = effectiveDescending ? "desc" : "asc";
             queryParams.push(`$orderby=${effectiveOrderBy} ${sortDirection}`);
-            // Add filters (only user filter is supported reliably)
-            const filters = [];
-            if (fromUser) {
-                filters.push(`from/user/id eq '${fromUser}'`);
-            }
-            if (filters.length > 0) {
-                queryParams.push(`$filter=${filters.join(" and ")}`);
-            }
+            // Note: Graph rejects $filter on from/user/id for chat messages, so
+            // the fromUser filter is applied client-side after fetching.
             const queryString = queryParams.join("&");
             // Fetch messages with pagination support
             const allMessages = [];
@@ -164,10 +158,13 @@ export function registerChatTools(server, graphService, readOnly) {
                     ],
                 };
             }
-            // Apply client-side date filtering since server-side filtering is not supported
+            // Apply client-side filtering since server-side filtering is not supported
             let filteredMessages = allMessages;
+            if (fromUser) {
+                filteredMessages = filteredMessages.filter((message) => message.from?.user?.id === fromUser);
+            }
             if (since || until) {
-                filteredMessages = allMessages.filter((message) => {
+                filteredMessages = filteredMessages.filter((message) => {
                     if (!message.createdDateTime)
                         return true;
                     const messageDate = new Date(message.createdDateTime);
@@ -191,16 +188,27 @@ export function registerChatTools(server, graphService, readOnly) {
                     id: message.id,
                     content: message.body?.content,
                     from: message.from?.user?.displayName,
+                    fromId: message.from?.user?.id ?? undefined,
                     createdDateTime: message.createdDateTime,
+                    lastEditedDateTime: message.lastEditedDateTime ?? undefined,
+                    deletedDateTime: message.deletedDateTime ?? undefined,
+                    messageType: message.messageType ?? undefined,
+                    importance: message.importance,
                 };
-                // Include attachment metadata if present
-                summary.attachments = extractAttachmentSummaries(message.attachments);
+                // File attachments plus inline images (contentType "hostedContent")
+                summary.attachments = collectMessageAttachments(message.attachments, message.body?.content);
                 // Include reactions if present
                 if (message.reactions?.length) {
                     summary.reactions = message.reactions.map((r) => ({
                         reactionType: r.reactionType,
                         displayName: r.displayName,
                         createdDateTime: r.createdDateTime,
+                        user: r.user?.user
+                            ? {
+                                id: r.user.user.id ?? undefined,
+                                displayName: r.user.user.displayName ?? undefined,
+                            }
+                            : undefined,
                     }));
                 }
                 return summary;
@@ -211,7 +219,7 @@ export function registerChatTools(server, graphService, readOnly) {
                         type: "text",
                         text: JSON.stringify({
                             filters: { since, until, fromUser },
-                            filteringMethod: since || until ? "client-side" : "server-side",
+                            filteringMethod: since || until || fromUser ? "client-side" : "server-side",
                             paginationEnabled: fetchAll,
                             pagesRetrieved: pageCount + 1,
                             totalRetrieved: allMessages.length,
@@ -235,171 +243,73 @@ export function registerChatTools(server, graphService, readOnly) {
             };
         }
     });
-    // Download attachments and hosted content from chat messages
-    server.tool("download_chat_attachment", "Download files and images from a chat message. Handles both inline images (hosted content) and file attachments (OneDrive/SharePoint references). Use get_chat_messages first to see available attachments.", {
+    // Download inline images (hosted content) embedded in a chat message
+    server.tool("download_chat_hosted_content", "Download inline images (hosted content) embedded in a chat message as base64. Hosted content lives inside Teams and has no download URL. For file attachments (contentType 'reference') use get_attachment_download_url instead.", {
         chatId: z.string().describe("Chat ID"),
-        messageId: z.string().describe("Message ID containing the attachment"),
-        attachmentIndex: z
-            .number()
-            .min(0)
-            .optional()
-            .describe("Index of a specific attachment to download (0-based). If not provided, downloads all attachments."),
-        savePath: z
+        messageId: z.string().describe("Message ID containing the inline content"),
+        hostedContentId: z
             .string()
             .optional()
-            .describe("Optional file path to save the content. Supports UNC paths (e.g., \\\\wsl.localhost\\Ubuntu\\tmp\\file.png)."),
-    }, async ({ chatId, messageId, attachmentIndex, savePath }) => {
+            .describe("Specific hosted content ID (from the message's attachments with contentType 'hostedContent'). If omitted, downloads all inline images in the message."),
+    }, async ({ chatId, messageId, hostedContentId }) => {
         try {
             const client = await graphService.getClient();
-            // Fetch the message to inspect attachments and body
-            const message = (await client
-                .api(`/me/chats/${chatId}/messages/${messageId}`)
-                .get());
-            if (!message) {
+            let ids;
+            if (hostedContentId) {
+                ids = [hostedContentId];
+            }
+            else {
+                const message = (await client
+                    .api(`/me/chats/${chatId}/messages/${messageId}`)
+                    .get());
+                ids = extractHostedContentIds(message.body?.content ?? "");
+            }
+            if (ids.length === 0) {
                 return {
-                    content: [{ type: "text", text: "❌ Message not found." }],
-                    isError: true,
+                    content: [
+                        {
+                            type: "text",
+                            text: "No inline images (hosted content) found in this message. For file attachments use get_attachment_download_url.",
+                        },
+                    ],
                 };
             }
-            const items = [];
-            // 1. Extract hosted content IDs from message body HTML (inline images)
-            const bodyContent = message.body?.content || "";
-            const hostedContentRegex = /hostedContents\/([a-zA-Z0-9_=-]+)\/\$value|itemid="([^"]+)"/gi;
-            let match;
-            // biome-ignore lint/suspicious/noAssignInExpressions: needed for regex extraction
-            while ((match = hostedContentRegex.exec(bodyContent)) !== null) {
-                const contentId = match[1] || match[2];
-                if (contentId && !items.some((i) => i.id === contentId)) {
-                    items.push({
-                        type: "hostedContent",
-                        id: contentId,
-                        name: `hosted_image_${items.length}.png`,
+            const results = [];
+            for (const id of ids) {
+                try {
+                    const response = await client
+                        .api(`/chats/${chatId}/messages/${messageId}/hostedContents/${id}/$value`)
+                        .responseType("arraybuffer")
+                        .get();
+                    const buffer = Buffer.from(response);
+                    if (buffer.length === 0) {
+                        throw new Error("Downloaded 0 bytes — the content is likely inaccessible");
+                    }
+                    if (buffer.length > MAX_INLINE_ATTACHMENT_BYTES) {
+                        throw new Error(`Content is too large for inline base64 (${buffer.length} bytes, limit ${MAX_INLINE_ATTACHMENT_BYTES})`);
+                    }
+                    results.push({
+                        hostedContentId: id,
+                        size: buffer.length,
+                        base64Data: buffer.toString("base64"),
                     });
                 }
-            }
-            // 2. Collect file reference attachments
-            if (message.attachments) {
-                for (const att of message.attachments) {
-                    if (att.contentType === "reference" && att.contentUrl) {
-                        items.push({
-                            type: "fileReference",
-                            id: att.id || `ref_${items.length}`,
-                            name: att.name || "unknown_file",
-                            contentUrl: att.contentUrl,
-                        });
-                    }
-                }
-            }
-            if (items.length === 0) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: "❌ No downloadable attachments found in this message.",
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            // Filter to specific attachment if index provided
-            const targetItems = attachmentIndex !== undefined ? [items[attachmentIndex]].filter(Boolean) : items;
-            if (targetItems.length === 0) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `❌ Attachment index ${attachmentIndex} out of range. Message has ${items.length} attachment(s).`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            // Download each item
-            const results = [];
-            for (const item of targetItems) {
-                const itemIndex = items.indexOf(item);
-                try {
-                    let buffer;
-                    if (item.type === "hostedContent") {
-                        // Download hosted content (inline images)
-                        const response = await client
-                            .api(`/chats/${chatId}/messages/${messageId}/hostedContents/${item.id}/$value`)
-                            .responseType("arraybuffer")
-                            .get();
-                        buffer = Buffer.from(response);
-                    }
-                    else {
-                        // Download file reference via Shares API
-                        if (!item.contentUrl) {
-                            throw new Error("Attachment has no download URL (contentUrl missing)");
-                        }
-                        const encodedUrl = encodeShareUrl(item.contentUrl);
-                        const response = await client
-                            .api(`/shares/${encodedUrl}/driveItem/content`)
-                            .responseType("arraybuffer")
-                            .get();
-                        buffer = Buffer.from(response);
-                    }
-                    const result = {
-                        index: itemIndex,
-                        type: item.type,
-                        name: item.name,
-                        size: buffer.length,
-                    };
-                    // Save to disk or return base64
-                    if (savePath) {
-                        const fs = await import("node:fs/promises");
-                        const path = await import("node:path");
-                        const normalizedPath = savePath.replace(/\\\\/g, "\\");
-                        const isUncPath = normalizedPath.startsWith("\\\\") || normalizedPath.startsWith("//");
-                        let finalPath = normalizedPath;
-                        if (targetItems.length > 1) {
-                            const ext = path.extname(normalizedPath);
-                            const base = ext ? normalizedPath.slice(0, -ext.length) : normalizedPath;
-                            finalPath = `${base}_${itemIndex}${ext || path.extname(item.name)}`;
-                        }
-                        const targetPath = isUncPath ? finalPath : path.resolve(finalPath);
-                        await fs.writeFile(targetPath, buffer);
-                        result.savedTo = targetPath;
-                    }
-                    else if (buffer.length > MAX_INLINE_ATTACHMENT_BYTES) {
-                        throw new Error(`File is too large for inline base64 (${buffer.length} bytes, limit ${MAX_INLINE_ATTACHMENT_BYTES}). ` +
-                            "Use get_attachment_download_url to download it directly instead.");
-                    }
-                    else {
-                        result.base64Data = buffer.toString("base64");
-                    }
-                    results.push(result);
-                }
-                catch (downloadError) {
-                    const errorMsg = downloadError instanceof Error ? downloadError.message : "Unknown error";
+                catch (itemError) {
                     results.push({
-                        index: itemIndex,
-                        type: item.type,
-                        name: item.name,
-                        size: 0,
-                        error: errorMsg,
+                        hostedContentId: id,
+                        error: itemError instanceof Error ? itemError.message : "Unknown error",
                     });
                 }
             }
             const successCount = results.filter((r) => !r.error).length;
-            const errorCount = results.filter((r) => r.error).length;
-            let summary = `📥 Downloaded ${successCount} of ${targetItems.length} attachment(s)`;
-            if (errorCount > 0) {
-                summary += ` (${errorCount} failed)`;
-            }
             return {
                 content: [
                     {
                         type: "text",
                         text: JSON.stringify({
-                            summary,
+                            summary: `Downloaded ${successCount} of ${ids.length} inline item(s)`,
                             messageId,
-                            totalAttachments: items.length,
-                            downloaded: targetItems.length,
-                            successCount,
-                            errorCount,
-                            attachments: results,
+                            items: results,
                         }, null, 2),
                     },
                 ],
@@ -411,9 +321,10 @@ export function registerChatTools(server, graphService, readOnly) {
                 content: [
                     {
                         type: "text",
-                        text: `❌ Error: ${errorMessage}`,
+                        text: `❌ Failed to download hosted content: ${errorMessage}`,
                     },
                 ],
+                isError: true,
             };
         }
     });
@@ -466,7 +377,7 @@ export function registerChatTools(server, graphService, readOnly) {
         }
     });
     // Get short-lived direct download URLs for message file attachments
-    server.tool("get_attachment_download_url", "Get short-lived (~1 hour) pre-authenticated download URLs for the file attachments of a chat message. The URLs download directly from OneDrive/SharePoint without auth headers (curl/browser friendly) — preferred over download_chat_attachment for anything larger than ~1 MB. Inline images (hosted content) have no download URL; use download_chat_attachment for those.", {
+    server.tool("get_attachment_download_url", "Get short-lived (~1 hour) pre-authenticated download URLs for the file attachments of a chat message. The URLs download directly from OneDrive/SharePoint without auth headers (curl/browser friendly) — the only way to fetch file attachments. Inline images (hosted content) have no download URL; use download_chat_hosted_content for those.", {
         chatId: z.string().describe("Chat ID"),
         messageId: z.string().describe("Message ID containing the attachments"),
     }, async ({ chatId, messageId }) => {
@@ -495,6 +406,7 @@ export function registerChatTools(server, graphService, readOnly) {
                 try {
                     const item = (await client
                         .api(`/shares/${encodeShareUrl(contentUrl)}/driveItem`)
+                        .header("Prefer", "redeemSharingLink")
                         .get());
                     results.push({
                         name: att.name,

@@ -83,7 +83,7 @@ describe("Chat Tools", () => {
         expect.any(Function)
       );
       expect(mockServer.tool).toHaveBeenCalledWith(
-        "download_chat_attachment",
+        "download_chat_hosted_content",
         expect.any(String),
         expect.any(Object),
         expect.any(Function)
@@ -197,7 +197,7 @@ describe("Chat Tools", () => {
         expect.any(Function)
       );
       expect(mockServer.tool).toHaveBeenCalledWith(
-        "download_chat_attachment",
+        "download_chat_hosted_content",
         expect.any(String),
         expect.any(Object),
         expect.any(Function)
@@ -352,8 +352,14 @@ describe("Chat Tools", () => {
         {
           id: "msg1",
           body: { content: "Hello" },
-          from: { user: { displayName: "John" } },
+          from: { user: { id: "user123", displayName: "John" } },
           createdDateTime: "2023-01-01T10:00:00Z",
+        },
+        {
+          id: "msg2",
+          body: { content: "Other" },
+          from: { user: { id: "user456", displayName: "Jane" } },
+          createdDateTime: "2023-01-01T11:00:00Z",
         },
       ];
 
@@ -362,7 +368,7 @@ describe("Chat Tools", () => {
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
 
-      const _result = await getChatMessagesHandler({
+      const result = await getChatMessagesHandler({
         chatId: "chat123",
         limit: 10,
         fromUser: "user123",
@@ -370,9 +376,16 @@ describe("Chat Tools", () => {
         descending: true, // Changed to true since ascending is not supported
       });
 
+      // fromUser is applied client-side — Graph rejects $filter on from/user/id
       expect(mockClient.api).toHaveBeenCalledWith(
-        "/me/chats/chat123/messages?$top=10&$orderby=lastModifiedDateTime desc&$filter=from/user/id eq 'user123'"
+        "/me/chats/chat123/messages?$top=10&$orderby=lastModifiedDateTime desc"
       );
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.filteringMethod).toBe("client-side");
+      expect(parsed.messages).toHaveLength(1);
+      expect(parsed.messages[0].id).toBe("msg1");
+      expect(parsed.messages[0].fromId).toBe("user123");
     });
 
     it("should reject ascending order for datetime fields", async () => {
@@ -2219,6 +2232,108 @@ describe("Chat Tools", () => {
     });
   });
 
+  describe("download_chat_hosted_content", () => {
+    let downloadHostedHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "download_chat_hosted_content");
+      downloadHostedHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should download inline images found in the message body", async () => {
+      const imageBytes = new TextEncoder().encode("fake-image-bytes");
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me/chats/chat123/messages/msg1") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "msg1",
+              body: {
+                content:
+                  '<img src="https://graph.microsoft.com/v1.0/chats/chat123/messages/msg1/hostedContents/aWQ9AAA=/$value">',
+              },
+            }),
+          };
+        }
+        if (path.includes("/hostedContents/aWQ9AAA=/$value")) {
+          return {
+            responseType: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue(imageBytes.buffer),
+            }),
+          };
+        }
+        return { get: vi.fn() };
+      });
+
+      const result = await downloadHostedHandler({ chatId: "chat123", messageId: "msg1" });
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.summary).toBe("Downloaded 1 of 1 inline item(s)");
+      expect(parsed.items[0].hostedContentId).toBe("aWQ9AAA=");
+      expect(Buffer.from(parsed.items[0].base64Data, "base64").toString()).toBe("fake-image-bytes");
+    });
+
+    it("should download a specific hosted content id without fetching the message", async () => {
+      const bytes = new TextEncoder().encode("x");
+      const messageGet = vi.fn();
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path.includes("/hostedContents/aWQ9BBB=/$value")) {
+          return {
+            responseType: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue(bytes.buffer),
+            }),
+          };
+        }
+        return { get: messageGet };
+      });
+
+      const result = await downloadHostedHandler({
+        chatId: "chat123",
+        messageId: "msg1",
+        hostedContentId: "aWQ9BBB=",
+      });
+
+      expect(messageGet).not.toHaveBeenCalled();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.items[0].hostedContentId).toBe("aWQ9BBB=");
+    });
+
+    it("should report zero-byte downloads as errors", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path.includes("/$value")) {
+          return {
+            responseType: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+            }),
+          };
+        }
+        return { get: vi.fn() };
+      });
+
+      const result = await downloadHostedHandler({
+        chatId: "chat123",
+        messageId: "msg1",
+        hostedContentId: "aWQ9CCC=",
+      });
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.summary).toBe("Downloaded 0 of 1 inline item(s)");
+      expect(parsed.items[0].error).toContain("0 bytes");
+    });
+
+    it("should report when the message has no inline images", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockResolvedValue({ id: "msg1", body: { content: "<p>text only</p>" } }),
+      });
+
+      const result = await downloadHostedHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(result.content[0].text).toContain("No inline images");
+    });
+  });
+
   describe("get_attachment_download_url", () => {
     let getUrlHandler: (args?: any) => Promise<any>;
 
@@ -2249,10 +2364,12 @@ describe("Chat Tools", () => {
         }
         if (path.startsWith("/shares/u!")) {
           return {
-            get: vi.fn().mockResolvedValue({
-              id: "item1",
-              size: 2048,
-              "@microsoft.graph.downloadUrl": "https://download.sharepoint.com/tempauth123",
+            header: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                id: "item1",
+                size: 2048,
+                "@microsoft.graph.downloadUrl": "https://download.sharepoint.com/tempauth123",
+              }),
             }),
           };
         }

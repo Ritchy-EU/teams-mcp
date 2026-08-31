@@ -15,7 +15,7 @@ import type {
   TeamSummary,
 } from "../types/graph.js";
 import {
-  extractAttachmentSummaries,
+  collectMessageAttachments,
   type ImageAttachment,
   imageUrlToBase64,
   isValidImageType,
@@ -196,14 +196,24 @@ export function registerTeamsTools(
           id: message.id,
           content: message.body?.content,
           from: message.from?.user?.displayName,
+          fromId: message.from?.user?.id ?? undefined,
           createdDateTime: message.createdDateTime,
+          lastEditedDateTime: message.lastEditedDateTime ?? undefined,
+          deletedDateTime: message.deletedDateTime ?? undefined,
+          messageType: message.messageType ?? undefined,
           importance: message.importance,
-          attachments: extractAttachmentSummaries(message.attachments),
+          attachments: collectMessageAttachments(message.attachments, message.body?.content),
           reactions: message.reactions?.map(
             (r: ChatMessageReaction): ReactionSummary => ({
               reactionType: r.reactionType,
               displayName: r.displayName,
               createdDateTime: r.createdDateTime,
+              user: r.user?.user
+                ? {
+                    id: r.user.user.id ?? undefined,
+                    displayName: r.user.user.displayName ?? undefined,
+                  }
+                : undefined,
             })
           ),
         }));
@@ -504,14 +514,24 @@ export function registerTeamsTools(
           id: reply.id,
           content: reply.body?.content,
           from: reply.from?.user?.displayName,
+          fromId: reply.from?.user?.id ?? undefined,
           createdDateTime: reply.createdDateTime,
+          lastEditedDateTime: reply.lastEditedDateTime ?? undefined,
+          deletedDateTime: reply.deletedDateTime ?? undefined,
+          messageType: reply.messageType ?? undefined,
           importance: reply.importance,
-          attachments: extractAttachmentSummaries(reply.attachments),
+          attachments: collectMessageAttachments(reply.attachments, reply.body?.content),
           reactions: reply.reactions?.map(
             (r: ChatMessageReaction): ReactionSummary => ({
               reactionType: r.reactionType,
               displayName: r.displayName,
               createdDateTime: r.createdDateTime,
+              user: r.user?.user
+                ? {
+                    id: r.user.user.id ?? undefined,
+                    displayName: r.user.user.displayName ?? undefined,
+                  }
+                : undefined,
             })
           ),
         }));
@@ -1160,6 +1180,7 @@ export function registerTeamsTools(
           try {
             const item = (await client
               .api(`/shares/${encodeShareUrl(contentUrl)}/driveItem`)
+              .header("Prefer", "redeemSharingLink")
               .get()) as Record<string, unknown>;
             results.push({
               name: att.name,

@@ -230,8 +230,8 @@ npm run build && node dist/index.js
 - `hide_chat` / `unhide_chat` - Hide or unhide a chat in your own chat list
 
 #### Media Operations
-- `download_message_hosted_content` - Download hosted content (images, files) from messages
-- `download_chat_attachment` - Download files and inline images from chat messages
+- `download_message_hosted_content` - Download inline images (hosted content) from channel messages
+- `download_chat_hosted_content` - Download inline images (hosted content) from chat messages
 
 #### Search Operations
 - `search_messages` - Search across all Teams messages using KQL syntax
