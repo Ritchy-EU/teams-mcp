@@ -19,7 +19,7 @@
     "build": "npm run clean && npm run compile",
     "clean": "rimraf dist",
     "compile": "tsc",
-    "prepare": "git config core.hooksPath .githooks",
+    "prepare": "git config core.hooksPath .githooks || exit 0",
     "ci": "biome ci src/",
     "dev": "tsx watch src/index.ts",
     "auth": "node dist/index.js authenticate",
