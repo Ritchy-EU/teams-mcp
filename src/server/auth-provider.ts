@@ -1,5 +1,10 @@
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
-import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  InvalidGrantError,
+  InvalidRequestError,
+  InvalidTokenError,
+  ServerError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type {
   AuthorizationParams,
   OAuthServerProvider,
@@ -20,6 +25,40 @@ const AUTHORIZATION_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2
 
 /** Our server's callback URL registered in Azure AD */
 const OUR_CALLBACK_URL = `${BASE_URL}/oauth/callback`;
+
+/**
+ * Translates a failed Entra token response into an OAuth error.
+ *
+ * The SDK's token handler only maps `OAuthError` subclasses to a 400 with the real error
+ * code; anything else becomes a 500 `server_error`. That distinction matters: a client
+ * told `invalid_grant` discards its refresh token and starts a fresh authorization, while
+ * a client told `server_error` just retries — forever, if the token is genuinely dead.
+ */
+function upstreamTokenError(status: number, body: string): Error {
+  let code: string | undefined;
+  let description: string | undefined;
+  try {
+    const parsed = JSON.parse(body);
+    code = typeof parsed.error === "string" ? parsed.error : undefined;
+    description =
+      typeof parsed.error_description === "string" ? parsed.error_description : undefined;
+  } catch {
+    // Not JSON — fall through to the status-based mapping below.
+  }
+
+  const message = description ?? body ?? `Token request failed (${status})`;
+
+  if (code === "invalid_grant") {
+    return new InvalidGrantError(message);
+  }
+  if (status >= 500) {
+    return new ServerError(message);
+  }
+  if (status >= 400) {
+    return new InvalidRequestError(message);
+  }
+  return new ServerError(message);
+}
 
 /** TTL for pending auth flows (10 minutes) */
 const PENDING_AUTH_TTL_MS = 10 * 60 * 1000;
@@ -184,7 +223,7 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`[OAuth] Token exchange failed (${response.status}): ${errorBody}`);
-      throw new Error(`Token exchange failed (${response.status}): ${errorBody}`);
+      throw upstreamTokenError(response.status, errorBody);
     }
 
     const data = await response.json();
@@ -234,7 +273,9 @@ export class MicrosoftEntraOAuthProvider implements OAuthServerProvider {
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`[OAuth] Token refresh failed (${response.status}): ${errorBody}`);
-      throw new Error(`Token refresh failed (${response.status}): ${errorBody}`);
+      // A dead refresh token must reach the client as `invalid_grant` so it re-authorizes
+      // instead of retrying a token that will never work again.
+      throw upstreamTokenError(response.status, errorBody);
     }
 
     const data = await response.json();

@@ -1,4 +1,8 @@
-import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  InvalidGrantError,
+  InvalidTokenError,
+  ServerError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { Response } from "express";
@@ -79,6 +83,72 @@ describe("MicrosoftEntraOAuthProvider", () => {
       const wrongAudience = makeToken(validPayload({ aud: "https://example.com" }));
 
       await expect(provider.verifyAccessToken(wrongAudience)).rejects.toThrow(InvalidTokenError);
+    });
+  });
+
+  describe("exchangeRefreshToken", () => {
+    const stubTokens = {
+      access_token: "at",
+      token_type: "Bearer",
+      expires_in: 3600,
+      refresh_token: "new-rt",
+      scope: "User.Read",
+    };
+
+    function mockTokenEndpoint(status: number, body: unknown) {
+      return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(typeof body === "string" ? body : JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("always sends offline_access so Entra keeps rotating the refresh token", async () => {
+      const fetchSpy = mockTokenEndpoint(200, stubTokens);
+
+      await provider.exchangeRefreshToken(stubClient, "rt", ["User.Read"]);
+
+      const body = String(fetchSpy.mock.calls[0]?.[1]?.body);
+      expect(new URLSearchParams(body).get("scope")?.split(" ")).toContain("offline_access");
+    });
+
+    it("surfaces a dead refresh token as invalid_grant, not a server error", async () => {
+      // The SDK turns a plain Error into 500 server_error, which makes clients retry a
+      // token that will never work again instead of starting a fresh authorization.
+      mockTokenEndpoint(400, {
+        error: "invalid_grant",
+        error_description: "AADSTS700082: The refresh token has expired.",
+      });
+
+      await expect(provider.exchangeRefreshToken(stubClient, "dead-rt")).rejects.toThrow(
+        InvalidGrantError
+      );
+    });
+
+    it("maps an upstream outage to a server error", async () => {
+      mockTokenEndpoint(503, { error: "temporarily_unavailable" });
+
+      await expect(provider.exchangeRefreshToken(stubClient, "rt")).rejects.toThrow(ServerError);
+    });
+
+    it("maps a non-JSON upstream failure without throwing", async () => {
+      mockTokenEndpoint(502, "<html>bad gateway</html>");
+
+      await expect(provider.exchangeRefreshToken(stubClient, "rt")).rejects.toThrow(ServerError);
+    });
+
+    it("returns the rotated refresh token on success", async () => {
+      mockTokenEndpoint(200, stubTokens);
+
+      const tokens = await provider.exchangeRefreshToken(stubClient, "rt");
+
+      expect(tokens.refresh_token).toBe("new-rt");
+      expect(tokens.access_token).toBe("at");
     });
   });
 
