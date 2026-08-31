@@ -1584,6 +1584,52 @@ describe("Teams Tools", () => {
   });
 
   describe("send_file_to_channel tool", () => {
+    it("should send an already-uploaded drive item without re-uploading", async () => {
+      const postMessageMock = vi.fn().mockResolvedValue({ id: "filemsg-item-1" });
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/teams/test-team-id/channels/test-channel-id/filesFolder") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "folder-1",
+              parentReference: { driveId: "drive-9" },
+            }),
+          };
+        }
+        if (path === "/drives/drive-9/items/item-7") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "item-7",
+              name: "big.zip",
+              size: 999,
+              webUrl: "https://spo.com/big.zip",
+              eTag: '"{CCCC-DDDD},3"',
+            }),
+          };
+        }
+        if (path === "/teams/test-team-id/channels/test-channel-id/messages") {
+          return { post: postMessageMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+      registerTeamsTools(mockServer, mockGraphService, false);
+
+      const tool = mockServer.getTool("send_file_to_channel");
+      const result = await tool.handler({
+        teamId: "test-team-id",
+        channelId: "test-channel-id",
+        driveItemId: "item-7",
+      });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to channel.");
+      const payload = postMessageMock.mock.calls[0][0];
+      expect(payload.attachments[0]).toEqual({
+        id: "CCCC-DDDD",
+        contentType: "reference",
+        contentUrl: "https://spo.com/big.zip",
+        name: "big.zip",
+      });
+    });
+
     it("should upload file and send message successfully", async () => {
       const { uploadFileToChannel } = await import("../../utils/file-upload.js");
 

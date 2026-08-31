@@ -39,7 +39,7 @@ describe("Chat Tools", () => {
     it("should register all chat tools", () => {
       registerChatTools(mockServer, mockGraphService, false);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(19);
+      expect(mockServer.tool).toHaveBeenCalledTimes(21);
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chats",
         expect.any(String),
@@ -154,12 +154,30 @@ describe("Chat Tools", () => {
         expect.any(Object),
         expect.any(Function)
       );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "get_attachment_download_url",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "create_file_upload_session",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
     });
 
     it("should register only read-only chat tools when readOnly is true", () => {
       registerChatTools(mockServer, mockGraphService, true);
 
-      expect(mockServer.tool).toHaveBeenCalledTimes(4);
+      expect(mockServer.tool).toHaveBeenCalledTimes(5);
+      expect(mockServer.tool).toHaveBeenCalledWith(
+        "get_attachment_download_url",
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Function)
+      );
       expect(mockServer.tool).toHaveBeenCalledWith(
         "list_chat_members",
         expect.any(String),
@@ -2197,6 +2215,247 @@ describe("Chat Tools", () => {
       const result = await unhideHandler({ chatId: "chat123" });
 
       expect(result.content[0].text).toBe("❌ Failed to unhide chat: Network error");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("get_attachment_download_url", () => {
+    let getUrlHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "get_attachment_download_url");
+      getUrlHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should return pre-authenticated download URLs for file attachments", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me/chats/chat123/messages/msg1") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "msg1",
+              attachments: [
+                {
+                  id: "att1",
+                  contentType: "reference",
+                  contentUrl: "https://contoso.sharepoint.com/personal/u/Documents/report.pdf",
+                  name: "report.pdf",
+                },
+              ],
+            }),
+          };
+        }
+        if (path.startsWith("/shares/u!")) {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "item1",
+              size: 2048,
+              "@microsoft.graph.downloadUrl": "https://download.sharepoint.com/tempauth123",
+            }),
+          };
+        }
+        return { get: vi.fn() };
+      });
+
+      const result = await getUrlHandler({ chatId: "chat123", messageId: "msg1" });
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.attachments).toHaveLength(1);
+      expect(parsed.attachments[0]).toEqual({
+        name: "report.pdf",
+        size: 2048,
+        downloadUrl: "https://download.sharepoint.com/tempauth123",
+      });
+    });
+
+    it("should report when the message has no file attachments", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockResolvedValue({ id: "msg1", attachments: [] }),
+      });
+
+      const result = await getUrlHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(result.content[0].text).toContain("No file attachments found");
+    });
+
+    it("should handle errors", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockRejectedValue(new Error("Not found")),
+      });
+
+      const result = await getUrlHandler({ chatId: "chat123", messageId: "msg1" });
+
+      expect(result.content[0].text).toBe("❌ Failed to get download URLs: Not found");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("create_file_upload_session", () => {
+    let createSessionHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "create_file_upload_session");
+      createSessionHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should create an upload session in OneDrive for chat target", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me/drive") {
+          return { get: vi.fn().mockResolvedValue({ id: "drive-1" }) };
+        }
+        if (path.includes("/createUploadSession")) {
+          return {
+            post: vi.fn().mockResolvedValue({
+              uploadUrl: "https://up.1drv.com/session-abc",
+              expirationDateTime: "2026-08-27T12:00:00Z",
+            }),
+          };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await createSessionHandler({ fileName: "big.zip", target: "chat" });
+
+      const apiCalls = vi.mocked(mockClient.api).mock.calls.map((c: any[]) => c[0]);
+      const sessionCall = apiCalls.find((p: string) => p.includes("/createUploadSession"));
+      expect(sessionCall).toContain("/drives/drive-1/items/root:");
+      expect(sessionCall).toContain(encodeURIComponent("Microsoft Teams Chat Files"));
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.uploadUrl).toBe("https://up.1drv.com/session-abc");
+      expect(parsed.expiresAt).toBe("2026-08-27T12:00:00Z");
+      expect(parsed.rules.chunkSizeMultipleOfBytes).toBe(327680);
+      expect(parsed.examples.bash).toContain("curl");
+    });
+
+    it("should create an upload session in the channel SharePoint folder", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/teams/team1/channels/chan1/filesFolder") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "folder-1",
+              parentReference: { driveId: "drive-9" },
+            }),
+          };
+        }
+        if (path.includes("/createUploadSession")) {
+          return {
+            post: vi.fn().mockResolvedValue({ uploadUrl: "https://up.spo.com/session-xyz" }),
+          };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await createSessionHandler({
+        fileName: "report.pdf",
+        target: "channel",
+        teamId: "team1",
+        channelId: "chan1",
+      });
+
+      const apiCalls = vi.mocked(mockClient.api).mock.calls.map((c: any[]) => c[0]);
+      const sessionCall = apiCalls.find((p: string) => p.includes("/createUploadSession"));
+      expect(sessionCall).toContain("/drives/drive-9/items/folder-1:");
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.uploadUrl).toBe("https://up.spo.com/session-xyz");
+    });
+
+    it("should require teamId and channelId for channel target", async () => {
+      const result = await createSessionHandler({ fileName: "a.txt", target: "channel" });
+
+      expect(result.content[0].text).toBe(
+        "❌ teamId and channelId are required when target is 'channel'."
+      );
+      expect(result.isError).toBe(true);
+    });
+
+    it("should handle errors", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockRejectedValue(new Error("Drive unavailable")),
+      });
+
+      const result = await createSessionHandler({ fileName: "a.txt", target: "chat" });
+
+      expect(result.content[0].text).toBe(
+        "❌ Failed to create upload session: Drive unavailable"
+      );
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("send_file_to_chat with driveItemId", () => {
+    let sendFileHandler: (args?: any) => Promise<any>;
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "send_file_to_chat");
+      sendFileHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("should send an already-uploaded drive item without re-uploading", async () => {
+      const postMessageMock = vi.fn().mockResolvedValue({ id: "filemsg1" });
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me/drive") {
+          return { get: vi.fn().mockResolvedValue({ id: "drive-1" }) };
+        }
+        if (path === "/drives/drive-1/items/item-42") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "item-42",
+              name: "big.zip",
+              size: 123456,
+              webUrl: "https://onedrive.com/big.zip",
+              eTag: '"{AAAA-BBBB},1"',
+            }),
+          };
+        }
+        if (path === "/drives/drive-1/items/item-42/createLink") {
+          return {
+            post: vi.fn().mockResolvedValue({ link: { webUrl: "https://share.link/xyz" } }),
+          };
+        }
+        if (path === "/me/chats/chat123/messages") {
+          return { post: postMessageMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await sendFileHandler({ chatId: "chat123", driveItemId: "item-42" });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
+      expect(result.content[0].text).toContain("big.zip");
+      const payload = postMessageMock.mock.calls[0][0];
+      expect(payload.attachments[0]).toEqual({
+        id: "AAAA-BBBB",
+        contentType: "reference",
+        contentUrl: "https://share.link/xyz",
+        name: "big.zip",
+      });
+    });
+
+    it("should reject when both filePath and driveItemId are provided", async () => {
+      const result = await sendFileHandler({
+        chatId: "chat123",
+        filePath: "/tmp/a.txt",
+        driveItemId: "item-1",
+      });
+
+      expect(result.content[0].text).toBe("❌ Provide either filePath or driveItemId, not both.");
+      expect(result.isError).toBe(true);
+    });
+
+    it("should reject when neither filePath nor driveItemId is provided", async () => {
+      const result = await sendFileHandler({ chatId: "chat123" });
+
+      expect(result.content[0].text).toContain("❌ Provide filePath");
       expect(result.isError).toBe(true);
     });
   });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { extractAttachmentSummaries, imageUrlToBase64, isValidImageType, uploadImageAsHostedContent, } from "../utils/attachments.js";
 import { detectContentType } from "../utils/content-type.js";
-import { buildFileAttachment, escapeHtml, formatFileSize, uploadFileToChannel, } from "../utils/file-upload.js";
+import { buildFileAttachment, escapeHtml, formatFileSize, resolveChannelDriveItem, uploadFileToChannel, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml, searchUsers } from "../utils/users.js";
 /**
@@ -1111,10 +1111,17 @@ export function registerTeamsTools(server, graphService, readOnly) {
         });
     // Send a file to a channel (write — skipped in read-only mode)
     if (!readOnly)
-        server.tool("send_file_to_channel", "Upload a local file and send it as a message to a Teams channel. Supports any file type (PDF, DOCX, ZIP, images, etc.). The file is uploaded to the channel's SharePoint folder and sent as a reference attachment. If messageId is provided, the file is sent as a reply to that message (thread).", {
+        server.tool("send_file_to_channel", "Send a file as a message to a Teams channel. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to the channel's SharePoint via create_file_upload_session — use this to send files from the caller's machine). If messageId is provided, the file is sent as a reply to that message (thread).", {
             teamId: z.string().describe("Team ID"),
             channelId: z.string().describe("Channel ID"),
-            filePath: z.string().describe("Absolute path to the local file to upload"),
+            filePath: z
+                .string()
+                .optional()
+                .describe("Path to a file on the MCP server's filesystem to upload"),
+            driveItemId: z
+                .string()
+                .optional()
+                .describe("ID of a drive item already uploaded via create_file_upload_session (alternative to filePath)"),
             message: z.string().optional().describe("Optional message text to accompany the file"),
             fileName: z
                 .string()
@@ -1129,10 +1136,38 @@ export function registerTeamsTools(server, graphService, readOnly) {
                 .string()
                 .optional()
                 .describe("Optional message ID to reply to. When provided, the file is sent as a reply in the message thread instead of a new message."),
-        }, async ({ teamId, channelId, filePath, message, fileName, format = "text", importance = "normal", messageId, }) => {
+        }, async ({ teamId, channelId, filePath, driveItemId, message, fileName, format = "text", importance = "normal", messageId, }) => {
             try {
+                if (filePath && driveItemId) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: "❌ Provide either filePath or driveItemId, not both.",
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
                 const client = await graphService.getClient();
-                const uploadResult = await uploadFileToChannel(graphService, teamId, channelId, filePath, fileName);
+                let uploadResult;
+                if (driveItemId) {
+                    uploadResult = await resolveChannelDriveItem(graphService, teamId, channelId, driveItemId);
+                }
+                else if (filePath) {
+                    uploadResult = await uploadFileToChannel(graphService, teamId, channelId, filePath, fileName);
+                }
+                else {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: "❌ Provide filePath (file on the server) or driveItemId (file uploaded via create_file_upload_session).",
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
                 // Build message content — must be HTML with attachment reference tag
                 let content = "";
                 if (message) {

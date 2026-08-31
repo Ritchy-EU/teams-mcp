@@ -17,12 +17,29 @@ import type {
 import { extractAttachmentSummaries } from "../utils/attachments.js";
 import {
   buildFileAttachment,
+  createUploadSessionForChannel,
+  createUploadSessionForChat,
   escapeHtml,
+  type FileUploadResult,
   formatFileSize,
+  resolveChatDriveItem,
+  type UploadSessionInfo,
   uploadFileToChat,
 } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml } from "../utils/users.js";
+
+/** Attachments larger than this are refused for inline base64 download. */
+const MAX_INLINE_ATTACHMENT_BYTES = 1024 * 1024; // 1 MiB
+
+/** Encode a SharePoint/OneDrive URL for the Graph Shares API ("u!" base64url format). */
+function encodeShareUrl(url: string): string {
+  return `u!${Buffer.from(url)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")}`;
+}
 
 /**
  * Registers all chat-related MCP tools on the given server.
@@ -436,15 +453,10 @@ export function registerChatTools(
               buffer = Buffer.from(response as ArrayBuffer);
             } else {
               // Download file reference via Shares API
-              // Encode the SharePoint URL as base64url with "u!" prefix
               if (!item.contentUrl) {
                 throw new Error("Attachment has no download URL (contentUrl missing)");
               }
-              const encodedUrl = `u!${Buffer.from(item.contentUrl)
-                .toString("base64")
-                .replace(/\+/g, "-")
-                .replace(/\//g, "_")
-                .replace(/=+$/, "")}`;
+              const encodedUrl = encodeShareUrl(item.contentUrl);
 
               const response = await client
                 .api(`/shares/${encodedUrl}/driveItem/content`)
@@ -486,6 +498,11 @@ export function registerChatTools(
               const targetPath = isUncPath ? finalPath : path.resolve(finalPath);
               await fs.writeFile(targetPath, buffer);
               result.savedTo = targetPath;
+            } else if (buffer.length > MAX_INLINE_ATTACHMENT_BYTES) {
+              throw new Error(
+                `File is too large for inline base64 (${buffer.length} bytes, limit ${MAX_INLINE_ATTACHMENT_BYTES}). ` +
+                  "Use get_attachment_download_url to download it directly instead."
+              );
             } else {
               result.base64Data = buffer.toString("base64");
             }
@@ -595,6 +612,90 @@ export function registerChatTools(
             {
               type: "text" as const,
               text: `❌ Failed to list chat members: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Get short-lived direct download URLs for message file attachments
+  server.tool(
+    "get_attachment_download_url",
+    "Get short-lived (~1 hour) pre-authenticated download URLs for the file attachments of a chat message. The URLs download directly from OneDrive/SharePoint without auth headers (curl/browser friendly) — preferred over download_chat_attachment for anything larger than ~1 MB. Inline images (hosted content) have no download URL; use download_chat_attachment for those.",
+    {
+      chatId: z.string().describe("Chat ID"),
+      messageId: z.string().describe("Message ID containing the attachments"),
+    },
+    async ({ chatId, messageId }) => {
+      try {
+        const client = await graphService.getClient();
+
+        const message = (await client
+          .api(`/me/chats/${chatId}/messages/${messageId}`)
+          .get()) as ChatMessage;
+
+        const fileAttachments = (message.attachments ?? []).filter(
+          (att) => att.contentType === "reference" && att.contentUrl
+        );
+
+        if (fileAttachments.length === 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No file attachments found in this message. Inline images (hosted content) can be fetched with download_chat_attachment.",
+              },
+            ],
+          };
+        }
+
+        const results: Array<Record<string, unknown>> = [];
+        for (const att of fileAttachments) {
+          const contentUrl = att.contentUrl;
+          if (!contentUrl) {
+            continue;
+          }
+          try {
+            const item = (await client
+              .api(`/shares/${encodeShareUrl(contentUrl)}/driveItem`)
+              .get()) as Record<string, unknown>;
+            results.push({
+              name: att.name,
+              size: item.size,
+              downloadUrl: item["@microsoft.graph.downloadUrl"],
+            });
+          } catch (itemError: unknown) {
+            results.push({
+              name: att.name,
+              error: itemError instanceof Error ? itemError.message : "Unknown error",
+            });
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  note: "Download URLs are pre-authenticated and expire after about 1 hour.",
+                  attachments: results,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to get download URLs: ${errorMessage}`,
             },
           ],
           isError: true,
@@ -1146,10 +1247,19 @@ export function registerChatTools(
   // Send a file to a chat
   server.tool(
     "send_file_to_chat",
-    "Upload a local file and send it as a message to a Teams chat. Supports any file type (PDF, DOCX, ZIP, images, etc.). The file is uploaded to OneDrive and sent as a reference attachment.",
+    "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment.",
     {
       chatId: z.string().describe("Chat ID"),
-      filePath: z.string().describe("Absolute path to the local file to upload"),
+      filePath: z
+        .string()
+        .optional()
+        .describe("Path to a file on the MCP server's filesystem to upload"),
+      driveItemId: z
+        .string()
+        .optional()
+        .describe(
+          "ID of a drive item already uploaded via create_file_upload_session (alternative to filePath)"
+        ),
       message: z.string().optional().describe("Optional message text to accompany the file"),
       fileName: z
         .string()
@@ -1158,11 +1268,46 @@ export function registerChatTools(
       format: z.enum(["text", "markdown"]).optional().describe("Message format (text or markdown)"),
       importance: z.enum(["normal", "high", "urgent"]).optional().describe("Message importance"),
     },
-    async ({ chatId, filePath, message, fileName, format = "text", importance = "normal" }) => {
+    async ({
+      chatId,
+      filePath,
+      driveItemId,
+      message,
+      fileName,
+      format = "text",
+      importance = "normal",
+    }) => {
       try {
+        if (filePath && driveItemId) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "❌ Provide either filePath or driveItemId, not both.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
         const client = await graphService.getClient();
 
-        const uploadResult = await uploadFileToChat(graphService, filePath, fileName);
+        let uploadResult: FileUploadResult;
+        if (driveItemId) {
+          uploadResult = await resolveChatDriveItem(graphService, driveItemId);
+        } else if (filePath) {
+          uploadResult = await uploadFileToChat(graphService, filePath, fileName);
+        } else {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "❌ Provide filePath (file on the server) or driveItemId (file uploaded via create_file_upload_session).",
+              },
+            ],
+            isError: true,
+          };
+        }
 
         // Build message content — must be HTML with attachment reference tag
         let content = "";
@@ -1572,6 +1717,85 @@ export function registerChatTools(
             {
               type: "text" as const,
               text: `❌ Failed to unhide chat: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Create a resumable upload session so a client can upload a file directly
+  server.tool(
+    "create_file_upload_session",
+    "Create a resumable OneDrive/SharePoint upload session for sending a file to Teams from the caller's machine. Returns a pre-authenticated uploadUrl: PUT the file bytes to it directly (no Authorization header needed) — the MCP server never stores the file. After the final chunk Graph returns the driveItem JSON; pass its 'id' as driveItemId to send_file_to_chat or send_file_to_channel.",
+    {
+      fileName: z.string().describe("Name for the uploaded file"),
+      target: z
+        .enum(["chat", "channel"])
+        .describe(
+          "Where the file will be sent afterwards: 'chat' uploads to your OneDrive, 'channel' to the channel's SharePoint folder"
+        ),
+      teamId: z.string().optional().describe("Team ID (required when target is 'channel')"),
+      channelId: z.string().optional().describe("Channel ID (required when target is 'channel')"),
+    },
+    async ({ fileName, target, teamId, channelId }) => {
+      try {
+        let session: UploadSessionInfo;
+        if (target === "channel") {
+          if (!teamId || !channelId) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "❌ teamId and channelId are required when target is 'channel'.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          session = await createUploadSessionForChannel(graphService, teamId, channelId, fileName);
+        } else {
+          session = await createUploadSessionForChat(graphService, fileName);
+        }
+
+        const guide = {
+          uploadUrl: session.uploadUrl,
+          expiresAt: session.expirationDateTime,
+          target,
+          fileName,
+          rules: {
+            authorization: "none — the uploadUrl is pre-authenticated",
+            singlePutMaxBytes: 62914560,
+            chunkSizeMultipleOfBytes: 327680,
+            contentRange: "required, e.g. 'bytes 0-{size-1}/{size}' for a single PUT",
+            finalResponse:
+              "JSON driveItem — pass its 'id' to send_file_to_chat/send_file_to_channel as driveItemId",
+          },
+          examples: {
+            bash: 'SIZE=$(stat -c%s "$FILE" 2>/dev/null || stat -f%z "$FILE"); curl -sS -X PUT "$UPLOAD_URL" -H "Content-Range: bytes 0-$((SIZE-1))/$SIZE" --data-binary @"$FILE"',
+            powershell:
+              '$size=(Get-Item $file).Length; curl.exe -sS -X PUT $uploadUrl -H "Content-Range: bytes 0-$($size-1)/$size" --data-binary "@$file"',
+            largeFiles:
+              "over 60 MiB: upload sequential chunks (multiples of 320 KiB) with matching Content-Range headers",
+          },
+        };
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(guide, null, 2),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ Failed to create upload session: ${errorMessage}`,
             },
           ],
           isError: true,
