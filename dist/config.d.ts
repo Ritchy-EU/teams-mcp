@@ -11,6 +11,19 @@ export declare const FULL_SCOPES: string[];
  */
 export declare const READ_ONLY: boolean;
 export declare const DELEGATED_SCOPES: string[];
+/**
+ * Scopes requested from Microsoft Entra ID in HTTP (OAuth) mode.
+ *
+ * `offline_access` is what makes Entra issue a refresh token; without it the
+ * session dies unrecoverably when the access token expires (~1h), so it is
+ * always forced into the outbound request regardless of what the MCP client asked for.
+ */
+export declare const HTTP_SCOPES: string[];
+/**
+ * Directory for server-side state that must survive a restart (currently the OAuth
+ * client registry). In Docker this should be a mounted volume — see docker-compose.yml.
+ */
+export declare const DATA_DIR: string;
 export declare const PORT: number;
 export declare const BASE_URL: string;
 export declare const AZURE_CLIENT_SECRET: string | undefined;

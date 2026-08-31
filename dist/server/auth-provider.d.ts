@@ -25,6 +25,7 @@ export declare class MicrosoftEntraOAuthProvider implements OAuthServerProvider 
      * Entries are cleaned up after use or after TTL expiry.
      */
     private pendingAuthFlows;
+    constructor(clientsStore?: OAuthRegisteredClientsStore);
     get clientsStore(): OAuthRegisteredClientsStore;
     authorize(_client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void>;
     /**

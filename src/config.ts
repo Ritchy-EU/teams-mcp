@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 // Azure AD application configuration.
 //
 // IMPORTANT: The built-in CLIENT_ID is the public Microsoft Graph CLI app registration
@@ -62,6 +65,21 @@ export const READ_ONLY = ["1", "true", "yes"].includes(
 );
 
 export const DELEGATED_SCOPES = READ_ONLY ? READ_ONLY_SCOPES : FULL_SCOPES;
+
+/**
+ * Scopes requested from Microsoft Entra ID in HTTP (OAuth) mode.
+ *
+ * `offline_access` is what makes Entra issue a refresh token; without it the
+ * session dies unrecoverably when the access token expires (~1h), so it is
+ * always forced into the outbound request regardless of what the MCP client asked for.
+ */
+export const HTTP_SCOPES = ["offline_access", ...DELEGATED_SCOPES];
+
+/**
+ * Directory for server-side state that must survive a restart (currently the OAuth
+ * client registry). In Docker this should be a mounted volume — see docker-compose.yml.
+ */
+export const DATA_DIR = process.env.TEAMS_MCP_DATA_DIR ?? join(homedir(), ".teams-mcp");
 
 // HTTP server configuration (used in `serve` mode)
 export const PORT = Number.parseInt(process.env.PORT || "3000", 10);

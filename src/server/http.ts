@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import {
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthRouter,
+} from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { ErrorRequestHandler } from "express";
-import { BASE_URL, DELEGATED_SCOPES, PORT, READ_ONLY } from "../config.js";
+import { BASE_URL, HTTP_SCOPES, PORT, READ_ONLY } from "../config.js";
 import { SessionGraphService } from "../services/graph.js";
 import { registerAuthTools } from "../tools/auth.js";
 import { registerChatTools } from "../tools/chats.js";
@@ -17,11 +20,6 @@ import { registerTeamsTools } from "../tools/teams.js";
 import { registerUsersTools } from "../tools/users.js";
 import { MicrosoftEntraOAuthProvider } from "./auth-provider.js";
 import { SessionManager } from "./session-manager.js";
-
-const HTTP_SCOPES = [
-  "offline_access", // Enables refresh tokens for long-lived sessions
-  ...DELEGATED_SCOPES,
-];
 
 function createSessionServer(tokenAccessor: () => Promise<string>): {
   server: McpServer;
@@ -101,6 +99,9 @@ export async function startHttpServer(): Promise<void> {
   const authMiddleware = requireBearerAuth({
     verifier: provider,
     requiredScopes: [],
+    // Included in the WWW-Authenticate header on 401 (RFC 9728), so a client whose token
+    // expired can discover the authorization server and refresh without a manual re-login.
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(BASE_URL)),
   });
 
   // Health check
@@ -174,7 +175,19 @@ export async function startHttpServer(): Promise<void> {
         return;
       }
 
-      // Invalid request
+      // A session ID was sent but we have no such session — it expired, or the server
+      // restarted. Per the MCP spec the client must start a new session on 404; on a 400
+      // it gives up instead and the user sees it as lost authentication.
+      if (sessionId) {
+        res.status(404).json({
+          jsonrpc: "2.0",
+          error: { code: -32001, message: "Session not found" },
+          id: null,
+        });
+        return;
+      }
+
+      // No session ID and not an initialize request — genuinely a bad request.
       res.status(400).json({
         jsonrpc: "2.0",
         error: {
@@ -200,7 +213,8 @@ export async function startHttpServer(): Promise<void> {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     const session = sessionId ? sessionManager.get(sessionId) : undefined;
     if (!session) {
-      res.status(400).send("Invalid or missing session ID");
+      // 404 so the client starts a new session instead of treating this as fatal.
+      res.status(sessionId ? 404 : 400).send("Invalid or missing session ID");
       return;
     }
     await session.transport.handleRequest(req, res);
@@ -211,7 +225,7 @@ export async function startHttpServer(): Promise<void> {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     const session = sessionId ? sessionManager.get(sessionId) : undefined;
     if (!session) {
-      res.status(400).send("Invalid or missing session ID");
+      res.status(sessionId ? 404 : 400).send("Invalid or missing session ID");
       return;
     }
     try {

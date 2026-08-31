@@ -1,30 +1,13 @@
-import { AZURE_CLIENT_SECRET, BASE_URL, CLIENT_ID, TENANT_ID } from "../config.js";
+import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { AZURE_CLIENT_SECRET, BASE_URL, CLIENT_ID, HTTP_SCOPES, TENANT_ID } from "../config.js";
 import { validateGraphToken } from "../services/graph.js";
+import { FileClientsStore } from "./clients-store.js";
 const TOKEN_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 const AUTHORIZATION_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize`;
 /** Our server's callback URL registered in Azure AD */
 const OUR_CALLBACK_URL = `${BASE_URL}/oauth/callback`;
 /** TTL for pending auth flows (10 minutes) */
 const PENDING_AUTH_TTL_MS = 10 * 60 * 1000;
-/**
- * In-memory store for dynamically registered MCP clients.
- */
-class InMemoryClientsStore {
-    clients = new Map();
-    getClient(clientId) {
-        return this.clients.get(clientId);
-    }
-    registerClient(client) {
-        const clientId = crypto.randomUUID();
-        const full = {
-            ...client,
-            client_id: clientId,
-            client_id_issued_at: Math.floor(Date.now() / 1000),
-        };
-        this.clients.set(clientId, full);
-        return full;
-    }
-}
 /**
  * OAuth provider that proxies authorization to Microsoft Entra ID.
  *
@@ -41,12 +24,15 @@ class InMemoryClientsStore {
  */
 export class MicrosoftEntraOAuthProvider {
     skipLocalPkceValidation = true;
-    _clientsStore = new InMemoryClientsStore();
+    _clientsStore;
     /**
      * Maps OAuth state → MCP client's original redirect_uri.
      * Entries are cleaned up after use or after TTL expiry.
      */
     pendingAuthFlows = new Map();
+    constructor(clientsStore = new FileClientsStore()) {
+        this._clientsStore = clientsStore;
+    }
     get clientsStore() {
         return this._clientsStore;
     }
@@ -72,8 +58,15 @@ export class MicrosoftEntraOAuthProvider {
         });
         if (params.state)
             searchParams.set("state", params.state);
-        if (params.scopes?.length)
-            searchParams.set("scope", params.scopes.join(" "));
+        // Always request our full scope set plus `offline_access`. MCP clients may send a
+        // narrower `scope` (or none at all, in which case params.scopes is undefined), and
+        // any request without `offline_access` gets no refresh token from Entra — leaving
+        // the session unrecoverable once the access token expires.
+        const scopes = new Set(params.scopes?.length ? params.scopes : []);
+        for (const scope of HTTP_SCOPES)
+            scopes.add(scope);
+        scopes.add("offline_access");
+        searchParams.set("scope", [...scopes].join(" "));
         targetUrl.search = searchParams.toString();
         res.redirect(targetUrl.toString());
     }
@@ -156,9 +149,13 @@ export class MicrosoftEntraOAuthProvider {
         if (AZURE_CLIENT_SECRET) {
             params.set("client_secret", AZURE_CLIENT_SECRET);
         }
-        if (scopes?.length) {
-            params.set("scope", scopes.join(" "));
-        }
+        // Entra rotates refresh tokens on every redemption, but only returns a new one when
+        // `offline_access` is in the request. Dropping it here would break the chain after a
+        // single refresh. Widen only by that scope — re-requesting scopes the user never
+        // consented to would fail the grant outright.
+        const scopeSet = new Set(scopes?.length ? scopes : HTTP_SCOPES);
+        scopeSet.add("offline_access");
+        params.set("scope", [...scopeSet].join(" "));
         const response = await fetch(TOKEN_URL, {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -166,9 +163,16 @@ export class MicrosoftEntraOAuthProvider {
         });
         if (!response.ok) {
             const errorBody = await response.text();
+            console.error(`[OAuth] Token refresh failed (${response.status}): ${errorBody}`);
             throw new Error(`Token refresh failed (${response.status}): ${errorBody}`);
         }
         const data = await response.json();
+        if (!data.refresh_token) {
+            console.error("[OAuth] Token refresh returned no new refresh token — the client will not be able " +
+                "to refresh again. Check that `offline_access` is consented for this app registration.");
+        }
+        console.log(`[OAuth] Token refreshed: expiresIn=${data.expires_in}s, ` +
+            `rotatedRefreshToken=${!!data.refresh_token}, scope=${data.scope}`);
         return {
             access_token: data.access_token,
             token_type: data.token_type ?? "Bearer",
@@ -182,7 +186,10 @@ export class MicrosoftEntraOAuthProvider {
         const validated = validateGraphToken(token);
         if (!validated) {
             console.error("[OAuth] Token verification FAILED");
-            throw new Error("Invalid or expired Microsoft Graph token");
+            // Must be an InvalidTokenError: requireBearerAuth maps it to 401 with a
+            // WWW-Authenticate header, which is what makes the MCP client refresh. Any other
+            // error becomes a 500, and clients just retry with the same expired token.
+            throw new InvalidTokenError("Invalid or expired Microsoft Graph token");
         }
         // Decode JWT payload for metadata
         const payload = JSON.parse(atob(token.split(".")[1]));

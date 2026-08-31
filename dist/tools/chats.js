@@ -890,7 +890,7 @@ export function registerChatTools(server, graphService, readOnly) {
         }
     });
     // Send a file to a chat
-    server.tool("send_file_to_chat", "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment and the current chat members are granted read access to it (mirroring what the Teams client does when sharing a file).", {
+    server.tool("send_file_to_chat", "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment and the current chat members are granted read access to it.", {
         chatId: z.string().describe("Chat ID"),
         filePath: z
             .string()
