@@ -1639,6 +1639,55 @@ describe("Chat Tools", () => {
       );
     });
 
+    it("should grant chat members access when the upload result carries drive ids", async () => {
+      const { uploadFileToChat } = await import("../../utils/file-upload.js");
+
+      const mockUploadResult: FileUploadResult = {
+        webUrl: "https://onedrive.com/file.pdf",
+        attachmentId: "AAAA-BBBB-CCCC",
+        fileName: "report.pdf",
+        fileSize: 2048,
+        mimeType: "application/pdf",
+        driveId: "drive-1",
+        itemId: "item-9",
+      };
+      vi.mocked(uploadFileToChat).mockResolvedValue(mockUploadResult);
+
+      const postMessageMock = vi.fn().mockResolvedValue({ id: "filemsg-grant" });
+      const inviteMock = vi.fn().mockResolvedValue({ value: [] });
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me-user" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({ value: [{ userId: "u2", email: "two@example.com" }] }),
+          };
+        }
+        if (path === "/drives/drive-1/items/item-9/invite") {
+          return { post: inviteMock };
+        }
+        if (path === "/me/chats/chat123/messages") {
+          return { post: postMessageMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await sendFileToChatHandler({
+        chatId: "chat123",
+        filePath: "/tmp/report.pdf",
+      });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
+      expect(result.content[0].text).toContain("Read access granted to 1 chat member(s).");
+      expect(inviteMock).toHaveBeenCalledWith({
+        recipients: [{ email: "two@example.com" }],
+        requireSignIn: true,
+        sendInvitation: false,
+        roles: ["read"],
+      });
+    });
+
     it("should include optional message text with HTML escaping", async () => {
       const { uploadFileToChat } = await import("../../utils/file-upload.js");
 
@@ -2515,11 +2564,26 @@ describe("Chat Tools", () => {
       sendFileHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
     });
 
-    it("should send an already-uploaded drive item without re-uploading", async () => {
+    it("should send an already-uploaded drive item and grant chat members access", async () => {
       const postMessageMock = vi.fn().mockResolvedValue({ id: "filemsg1" });
+      const inviteMock = vi.fn().mockResolvedValue({ value: [] });
       mockClient.api = vi.fn().mockImplementation((path: string) => {
         if (path === "/me/drive") {
           return { get: vi.fn().mockResolvedValue({ id: "drive-1" }) };
+        }
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me-user" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              value: [
+                { userId: "me-user", email: "me@example.com" },
+                { userId: "u2", email: "two@example.com" },
+                { userId: "u3" },
+              ],
+            }),
+          };
         }
         if (path === "/drives/drive-1/items/item-42") {
           return {
@@ -2537,6 +2601,9 @@ describe("Chat Tools", () => {
             post: vi.fn().mockResolvedValue({ link: { webUrl: "https://share.link/xyz" } }),
           };
         }
+        if (path === "/drives/drive-1/items/item-42/invite") {
+          return { post: inviteMock };
+        }
         if (path === "/me/chats/chat123/messages") {
           return { post: postMessageMock };
         }
@@ -2547,6 +2614,7 @@ describe("Chat Tools", () => {
 
       expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
       expect(result.content[0].text).toContain("big.zip");
+      expect(result.content[0].text).toContain("Read access granted to 2 chat member(s).");
       const payload = postMessageMock.mock.calls[0][0];
       expect(payload.attachments[0]).toEqual({
         id: "AAAA-BBBB",
@@ -2554,6 +2622,66 @@ describe("Chat Tools", () => {
         contentUrl: "https://share.link/xyz",
         name: "big.zip",
       });
+      // Grant excludes the sender, prefers email, falls back to objectId
+      expect(inviteMock).toHaveBeenCalledWith({
+        recipients: [{ email: "two@example.com" }, { objectId: "u3" }],
+        requireSignIn: true,
+        sendInvitation: false,
+        roles: ["read"],
+      });
+      // Grant must land before the message so recipients never see an inaccessible file
+      expect(inviteMock.mock.invocationCallOrder[0]).toBeLessThan(
+        postMessageMock.mock.invocationCallOrder[0]
+      );
+    });
+
+    it("should still send the message with a warning when the access grant fails", async () => {
+      const postMessageMock = vi.fn().mockResolvedValue({ id: "filemsg2" });
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/me/drive") {
+          return { get: vi.fn().mockResolvedValue({ id: "drive-1" }) };
+        }
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me-user" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return {
+            get: vi.fn().mockResolvedValue({ value: [{ userId: "u2", email: "two@example.com" }] }),
+          };
+        }
+        if (path === "/drives/drive-1/items/item-42") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "item-42",
+              name: "big.zip",
+              size: 123456,
+              webUrl: "https://onedrive.com/big.zip",
+              eTag: '"{AAAA-BBBB},1"',
+            }),
+          };
+        }
+        if (path === "/drives/drive-1/items/item-42/createLink") {
+          return {
+            post: vi.fn().mockResolvedValue({ link: { webUrl: "https://share.link/xyz" } }),
+          };
+        }
+        if (path === "/drives/drive-1/items/item-42/invite") {
+          return { post: vi.fn().mockRejectedValue(new Error("Invite blocked by policy")) };
+        }
+        if (path === "/me/chats/chat123/messages") {
+          return { post: postMessageMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      });
+
+      const result = await sendFileHandler({ chatId: "chat123", driveItemId: "item-42" });
+
+      expect(result.content[0].text).toContain("✅ File sent successfully to chat.");
+      expect(result.content[0].text).toContain(
+        "⚠️ Could not grant chat members access to the file (Invite blocked by policy)."
+      );
+      expect(result.isError).toBeUndefined();
+      expect(postMessageMock).toHaveBeenCalled();
     });
 
     it("should reject when both filePath and driveItemId are provided", async () => {

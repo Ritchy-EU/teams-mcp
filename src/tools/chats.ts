@@ -23,6 +23,7 @@ import {
   escapeHtml,
   type FileUploadResult,
   formatFileSize,
+  grantChatMembersAccess,
   resolveChatDriveItem,
   type UploadSessionInfo,
   uploadFileToChat,
@@ -1111,7 +1112,7 @@ export function registerChatTools(
   // Send a file to a chat
   server.tool(
     "send_file_to_chat",
-    "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment.",
+    "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment and the current chat members are granted read access to it.",
     {
       chatId: z.string().describe("Chat ID"),
       filePath: z
@@ -1173,6 +1174,28 @@ export function registerChatTools(
           };
         }
 
+        // Grant chat members read access BEFORE the message lands — the Teams
+        // client does this synchronously on share; without it recipients get
+        // 403 on the file until they open it in the Teams client once.
+        let accessNote = "";
+        if (uploadResult.driveId && uploadResult.itemId) {
+          try {
+            const granted = await grantChatMembersAccess(
+              graphService,
+              chatId,
+              uploadResult.driveId,
+              uploadResult.itemId
+            );
+            if (granted > 0) {
+              accessNote = `\nRead access granted to ${granted} chat member(s).`;
+            }
+          } catch (grantError: unknown) {
+            const grantMessage =
+              grantError instanceof Error ? grantError.message : "Unknown error occurred";
+            accessNote = `\n⚠️ Could not grant chat members access to the file (${grantMessage}). Recipients may need to open it in the Teams client once before downloading.`;
+          }
+        }
+
         // Build message content — must be HTML with attachment reference tag
         let content = "";
         if (message) {
@@ -1201,7 +1224,7 @@ export function registerChatTools(
           content: [
             {
               type: "text" as const,
-              text: `✅ File sent successfully to chat.\nFile: ${uploadResult.fileName} (${formatFileSize(uploadResult.fileSize)})\nMessage ID: ${result.id}`,
+              text: `✅ File sent successfully to chat.\nFile: ${uploadResult.fileName} (${formatFileSize(uploadResult.fileSize)})\nMessage ID: ${result.id}${accessNote}`,
             },
           ],
         };

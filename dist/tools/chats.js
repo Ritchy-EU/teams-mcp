@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { collectMessageAttachments, extractHostedContentIds } from "../utils/attachments.js";
-import { buildFileAttachment, createUploadSessionForChannel, createUploadSessionForChat, encodeShareUrl, escapeHtml, formatFileSize, resolveChatDriveItem, uploadFileToChat, } from "../utils/file-upload.js";
+import { buildFileAttachment, createUploadSessionForChannel, createUploadSessionForChat, encodeShareUrl, escapeHtml, formatFileSize, grantChatMembersAccess, resolveChatDriveItem, uploadFileToChat, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml } from "../utils/users.js";
 /** Attachments larger than this are refused for inline base64 download. */
@@ -890,7 +890,7 @@ export function registerChatTools(server, graphService, readOnly) {
         }
     });
     // Send a file to a chat
-    server.tool("send_file_to_chat", "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment.", {
+    server.tool("send_file_to_chat", "Send a file as a message to a Teams chat. Provide either filePath (a file on the MCP server's filesystem) or driveItemId (a file already uploaded to OneDrive via create_file_upload_session — use this to send files from the caller's machine). The file is sent as a reference attachment and the current chat members are granted read access to it (mirroring what the Teams client does when sharing a file).", {
         chatId: z.string().describe("Chat ID"),
         filePath: z
             .string()
@@ -939,6 +939,22 @@ export function registerChatTools(server, graphService, readOnly) {
                     isError: true,
                 };
             }
+            // Grant chat members read access BEFORE the message lands — the Teams
+            // client does this synchronously on share; without it recipients get
+            // 403 on the file until they open it in the Teams client once.
+            let accessNote = "";
+            if (uploadResult.driveId && uploadResult.itemId) {
+                try {
+                    const granted = await grantChatMembersAccess(graphService, chatId, uploadResult.driveId, uploadResult.itemId);
+                    if (granted > 0) {
+                        accessNote = `\nRead access granted to ${granted} chat member(s).`;
+                    }
+                }
+                catch (grantError) {
+                    const grantMessage = grantError instanceof Error ? grantError.message : "Unknown error occurred";
+                    accessNote = `\n⚠️ Could not grant chat members access to the file (${grantMessage}). Recipients may need to open it in the Teams client once before downloading.`;
+                }
+            }
             // Build message content — must be HTML with attachment reference tag
             let content = "";
             if (message) {
@@ -964,7 +980,7 @@ export function registerChatTools(server, graphService, readOnly) {
                 content: [
                     {
                         type: "text",
-                        text: `✅ File sent successfully to chat.\nFile: ${uploadResult.fileName} (${formatFileSize(uploadResult.fileSize)})\nMessage ID: ${result.id}`,
+                        text: `✅ File sent successfully to chat.\nFile: ${uploadResult.fileName} (${formatFileSize(uploadResult.fileSize)})\nMessage ID: ${result.id}${accessNote}`,
                     },
                 ],
             };

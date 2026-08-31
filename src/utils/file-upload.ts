@@ -52,6 +52,8 @@ export interface FileUploadResult {
   fileName: string;
   fileSize: number;
   mimeType: string;
+  driveId?: string | undefined;
+  itemId?: string | undefined;
 }
 
 /** Graph API response from a DriveItem upload (simple PUT or final chunk). */
@@ -269,6 +271,8 @@ export async function uploadFileToChat(
     fileName,
     fileSize: size,
     mimeType,
+    driveId,
+    itemId: uploadResult.id || undefined,
   };
 }
 
@@ -390,6 +394,54 @@ export async function createChatSharingLink(
   return undefined;
 }
 
+/** Graph API response for a chat members listing (fields used for access grants). */
+type ChatMembersResponse = {
+  value?: Array<{ userId?: string; email?: string }>;
+};
+
+/**
+ * Grant every other chat member direct read access to a drive item.
+ * The Teams client does this synchronously when a user shares a file in a chat;
+ * without it, recipients cannot download the file via Graph until they open it
+ * in the Teams client once. sendInvitation:false adds the permission silently.
+ * Returns the number of members granted access (0 when the chat has no other members).
+ */
+export async function grantChatMembersAccess(
+  graphService: IGraphService,
+  chatId: string,
+  driveId: string,
+  itemId: string
+): Promise<number> {
+  const client = await graphService.getClient();
+  const me = (await client.api("/me").get()) as { id?: string };
+  const membersResponse = (await client
+    .api(`/chats/${chatId}/members`)
+    .get()) as ChatMembersResponse;
+
+  const recipients: Array<{ email: string } | { objectId: string }> = [];
+  const seen = new Set<string>();
+  for (const member of membersResponse?.value ?? []) {
+    const userId = member.userId;
+    if (!userId || userId === me?.id || seen.has(userId)) {
+      continue;
+    }
+    seen.add(userId);
+    recipients.push(member.email ? { email: member.email } : { objectId: userId });
+  }
+
+  if (recipients.length === 0) {
+    return 0;
+  }
+
+  await client.api(`/drives/${driveId}/items/${itemId}/invite`).post({
+    recipients,
+    requireSignIn: true,
+    sendInvitation: false,
+    roles: ["read"],
+  });
+  return recipients.length;
+}
+
 /** Fetch an already-uploaded drive item and build a FileUploadResult for it. */
 async function resolveDriveItem(
   graphService: IGraphService,
@@ -407,6 +459,8 @@ async function resolveDriveItem(
     fileName: item.name,
     fileSize: item.size ?? 0,
     mimeType: item.file?.mimeType || detectMimeType(item.name),
+    driveId,
+    itemId: item.id ?? itemId,
   };
 }
 

@@ -5,6 +5,8 @@ export interface FileUploadResult {
     fileName: string;
     fileSize: number;
     mimeType: string;
+    driveId?: string | undefined;
+    itemId?: string | undefined;
 }
 /**
  * Detect MIME type from file extension.
@@ -54,6 +56,14 @@ export declare function formatFileSize(bytes: number): string;
  * the caller can then fall back to the item's direct webUrl.
  */
 export declare function createChatSharingLink(graphService: IGraphService, driveId: string, itemId: string): Promise<string | undefined>;
+/**
+ * Grant every other chat member direct read access to a drive item.
+ * The Teams client does this synchronously when a user shares a file in a chat;
+ * without it, recipients cannot download the file via Graph until they open it
+ * in the Teams client once. sendInvitation:false adds the permission silently.
+ * Returns the number of members granted access (0 when the chat has no other members).
+ */
+export declare function grantChatMembersAccess(graphService: IGraphService, chatId: string, driveId: string, itemId: string): Promise<number>;
 /**
  * Build a FileUploadResult for a file already uploaded to the user's OneDrive
  * (e.g. via create_file_upload_session), including the sharing link chats need.

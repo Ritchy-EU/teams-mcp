@@ -7,6 +7,7 @@ import {
   extractGuidFromETag,
   type FileUploadResult,
   formatFileSize,
+  grantChatMembersAccess,
   uploadFileToChannel,
   uploadFileToChat,
 } from "../file-upload.js";
@@ -484,5 +485,81 @@ describe("uploadFileToChat", () => {
     const apiCalls = mockClient.api.mock.calls.map((c: any[]) => c[0]);
     const createLinkCalls = apiCalls.filter((p: string) => p.includes("/createLink"));
     expect(createLinkCalls).toHaveLength(0);
+  });
+});
+
+describe("grantChatMembersAccess", () => {
+  let mockClient: any;
+  let mockGraphService: any;
+  let inviteMock: ReturnType<typeof vi.fn>;
+
+  const setupClient = (members: Array<{ userId?: string; email?: string }>) => {
+    inviteMock = vi.fn().mockResolvedValue({ value: [] });
+    mockClient = {
+      api: vi.fn().mockImplementation((path: string) => {
+        if (path === "/me") {
+          return { get: vi.fn().mockResolvedValue({ id: "me-user" }) };
+        }
+        if (path === "/chats/chat123/members") {
+          return { get: vi.fn().mockResolvedValue({ value: members }) };
+        }
+        if (path === "/drives/drive-1/items/item-1/invite") {
+          return { post: inviteMock };
+        }
+        return { get: vi.fn(), post: vi.fn() };
+      }),
+    };
+    mockGraphService = { getClient: vi.fn().mockResolvedValue(mockClient) };
+  };
+
+  it("should grant read access to all members except the sender", async () => {
+    setupClient([
+      { userId: "me-user", email: "me@example.com" },
+      { userId: "u2", email: "two@example.com" },
+      { userId: "u3", email: "three@example.com" },
+    ]);
+
+    const granted = await grantChatMembersAccess(mockGraphService, "chat123", "drive-1", "item-1");
+
+    expect(granted).toBe(2);
+    expect(inviteMock).toHaveBeenCalledWith({
+      recipients: [{ email: "two@example.com" }, { email: "three@example.com" }],
+      requireSignIn: true,
+      sendInvitation: false,
+      roles: ["read"],
+    });
+  });
+
+  it("should fall back to objectId when a member has no email and dedupe by userId", async () => {
+    setupClient([
+      { userId: "u2" },
+      { userId: "u2", email: "dup@example.com" },
+      { email: "no-user-id@example.com" },
+    ]);
+
+    const granted = await grantChatMembersAccess(mockGraphService, "chat123", "drive-1", "item-1");
+
+    expect(granted).toBe(1);
+    expect(inviteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ recipients: [{ objectId: "u2" }] })
+    );
+  });
+
+  it("should skip the invite call when there are no other members", async () => {
+    setupClient([{ userId: "me-user", email: "me@example.com" }]);
+
+    const granted = await grantChatMembersAccess(mockGraphService, "chat123", "drive-1", "item-1");
+
+    expect(granted).toBe(0);
+    expect(inviteMock).not.toHaveBeenCalled();
+  });
+
+  it("should propagate invite errors to the caller", async () => {
+    setupClient([{ userId: "u2", email: "two@example.com" }]);
+    inviteMock.mockRejectedValue(new Error("Invite blocked by policy"));
+
+    await expect(
+      grantChatMembersAccess(mockGraphService, "chat123", "drive-1", "item-1")
+    ).rejects.toThrow("Invite blocked by policy");
   });
 });

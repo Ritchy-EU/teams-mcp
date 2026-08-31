@@ -179,6 +179,8 @@ export async function uploadFileToChat(graphService, filePath, customFileName) {
         fileName,
         fileSize: size,
         mimeType,
+        driveId,
+        itemId: uploadResult.id || undefined,
     };
 }
 /**
@@ -269,6 +271,40 @@ export async function createChatSharingLink(graphService, driveId, itemId) {
     }
     return undefined;
 }
+/**
+ * Grant every other chat member direct read access to a drive item.
+ * The Teams client does this synchronously when a user shares a file in a chat;
+ * without it, recipients cannot download the file via Graph until they open it
+ * in the Teams client once. sendInvitation:false adds the permission silently.
+ * Returns the number of members granted access (0 when the chat has no other members).
+ */
+export async function grantChatMembersAccess(graphService, chatId, driveId, itemId) {
+    const client = await graphService.getClient();
+    const me = (await client.api("/me").get());
+    const membersResponse = (await client
+        .api(`/chats/${chatId}/members`)
+        .get());
+    const recipients = [];
+    const seen = new Set();
+    for (const member of membersResponse?.value ?? []) {
+        const userId = member.userId;
+        if (!userId || userId === me?.id || seen.has(userId)) {
+            continue;
+        }
+        seen.add(userId);
+        recipients.push(member.email ? { email: member.email } : { objectId: userId });
+    }
+    if (recipients.length === 0) {
+        return 0;
+    }
+    await client.api(`/drives/${driveId}/items/${itemId}/invite`).post({
+        recipients,
+        requireSignIn: true,
+        sendInvitation: false,
+        roles: ["read"],
+    });
+    return recipients.length;
+}
 /** Fetch an already-uploaded drive item and build a FileUploadResult for it. */
 async function resolveDriveItem(graphService, driveId, itemId) {
     const client = await graphService.getClient();
@@ -282,6 +318,8 @@ async function resolveDriveItem(graphService, driveId, itemId) {
         fileName: item.name,
         fileSize: item.size ?? 0,
         mimeType: item.file?.mimeType || detectMimeType(item.name),
+        driveId,
+        itemId: item.id ?? itemId,
     };
 }
 /**
