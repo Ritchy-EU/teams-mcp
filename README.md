@@ -207,6 +207,7 @@ npm run build && node dist/index.js
 - `delete_channel_message` - Soft delete a channel message (supports replies)
 - `list_team_members` - List members of a specific team
 - `send_file_to_channel` - Send a file as a channel message or thread reply (server file or uploaded drive item)
+- `get_channel_attachment_download_url` - Get short-lived direct download URLs for channel message attachments (supports replies)
 - `set_channel_message_reaction` / `unset_channel_message_reaction` - Add or remove reactions
 
 #### Chat Operations

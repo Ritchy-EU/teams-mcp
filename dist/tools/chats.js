@@ -1,18 +1,10 @@
 import { z } from "zod";
 import { extractAttachmentSummaries } from "../utils/attachments.js";
-import { buildFileAttachment, createUploadSessionForChannel, createUploadSessionForChat, escapeHtml, formatFileSize, resolveChatDriveItem, uploadFileToChat, } from "../utils/file-upload.js";
+import { buildFileAttachment, createUploadSessionForChannel, createUploadSessionForChat, encodeShareUrl, escapeHtml, formatFileSize, resolveChatDriveItem, uploadFileToChat, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml } from "../utils/users.js";
 /** Attachments larger than this are refused for inline base64 download. */
 const MAX_INLINE_ATTACHMENT_BYTES = 1024 * 1024; // 1 MiB
-/** Encode a SharePoint/OneDrive URL for the Graph Shares API ("u!" base64url format). */
-function encodeShareUrl(url) {
-    return `u!${Buffer.from(url)
-        .toString("base64")
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "")}`;
-}
 /**
  * Registers all chat-related MCP tools on the given server.
  * Tools include: list_chats, get_chat_messages, send_chat_message,

@@ -58,7 +58,8 @@ describe("Teams Tools", () => {
       expect(registeredTools).toContain("list_team_members");
       expect(registeredTools).toContain("search_users_for_mentions");
       expect(registeredTools).toContain("download_message_hosted_content");
-      expect(registeredTools).toHaveLength(7);
+      expect(registeredTools).toContain("get_channel_attachment_download_url");
+      expect(registeredTools).toHaveLength(8);
 
       // Write tools should NOT be registered
       expect(registeredTools).not.toContain("send_channel_message");
@@ -70,11 +71,11 @@ describe("Teams Tools", () => {
       expect(registeredTools).not.toContain("send_file_to_channel");
     });
 
-    it("should register all 14 tools when readOnly is false", () => {
+    it("should register all 15 tools when readOnly is false", () => {
       registerTeamsTools(mockServer, mockGraphService, false);
 
       const registeredTools = mockServer.getAllTools();
-      expect(registeredTools).toHaveLength(14);
+      expect(registeredTools).toHaveLength(15);
     });
   });
 
@@ -1579,6 +1580,92 @@ describe("Teams Tools", () => {
       });
 
       expect(result.content[0].text).toBe("❌ Failed to unset reaction: Not found");
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("get_channel_attachment_download_url tool", () => {
+    it("should return download URLs for channel message attachments", async () => {
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/teams/test-team-id/channels/test-channel-id/messages/msg1") {
+          return {
+            get: vi.fn().mockResolvedValue({
+              id: "msg1",
+              attachments: [
+                {
+                  id: "a1",
+                  contentType: "reference",
+                  contentUrl: "https://contoso.sharepoint.com/sites/team/Shared/f.pdf",
+                  name: "f.pdf",
+                },
+              ],
+            }),
+          };
+        }
+        if (path.startsWith("/shares/u!")) {
+          return {
+            get: vi.fn().mockResolvedValue({
+              size: 4096,
+              "@microsoft.graph.downloadUrl": "https://download.spo.com/tempauth-xyz",
+            }),
+          };
+        }
+        return { get: vi.fn() };
+      });
+      registerTeamsTools(mockServer, mockGraphService, false);
+
+      const tool = mockServer.getTool("get_channel_attachment_download_url");
+      const result = await tool.handler({
+        teamId: "test-team-id",
+        channelId: "test-channel-id",
+        messageId: "msg1",
+      });
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.attachments).toHaveLength(1);
+      expect(parsed.attachments[0]).toEqual({
+        name: "f.pdf",
+        size: 4096,
+        downloadUrl: "https://download.spo.com/tempauth-xyz",
+      });
+    });
+
+    it("should fetch reply attachments when replyId is provided", async () => {
+      const getMock = vi.fn().mockResolvedValue({ id: "r1", attachments: [] });
+      mockClient.api = vi.fn().mockImplementation((path: string) => {
+        if (path === "/teams/test-team-id/channels/test-channel-id/messages/msg1/replies/r1") {
+          return { get: getMock };
+        }
+        return { get: vi.fn() };
+      });
+      registerTeamsTools(mockServer, mockGraphService, false);
+
+      const tool = mockServer.getTool("get_channel_attachment_download_url");
+      const result = await tool.handler({
+        teamId: "test-team-id",
+        channelId: "test-channel-id",
+        messageId: "msg1",
+        replyId: "r1",
+      });
+
+      expect(getMock).toHaveBeenCalled();
+      expect(result.content[0].text).toContain("No file attachments found");
+    });
+
+    it("should handle errors", async () => {
+      mockClient.api = vi.fn().mockReturnValue({
+        get: vi.fn().mockRejectedValue(new Error("Not found")),
+      });
+      registerTeamsTools(mockServer, mockGraphService, false);
+
+      const tool = mockServer.getTool("get_channel_attachment_download_url");
+      const result = await tool.handler({
+        teamId: "t",
+        channelId: "c",
+        messageId: "m",
+      });
+
+      expect(result.content[0].text).toBe("❌ Failed to get download URLs: Not found");
       expect(result.isError).toBe(true);
     });
   });

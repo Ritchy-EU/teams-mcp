@@ -19,6 +19,7 @@ import {
   buildFileAttachment,
   createUploadSessionForChannel,
   createUploadSessionForChat,
+  encodeShareUrl,
   escapeHtml,
   type FileUploadResult,
   formatFileSize,
@@ -31,15 +32,6 @@ import { processMentionsInHtml } from "../utils/users.js";
 
 /** Attachments larger than this are refused for inline base64 download. */
 const MAX_INLINE_ATTACHMENT_BYTES = 1024 * 1024; // 1 MiB
-
-/** Encode a SharePoint/OneDrive URL for the Graph Shares API ("u!" base64url format). */
-function encodeShareUrl(url: string): string {
-  return `u!${Buffer.from(url)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")}`;
-}
 
 /**
  * Registers all chat-related MCP tools on the given server.

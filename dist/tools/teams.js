@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { extractAttachmentSummaries, imageUrlToBase64, isValidImageType, uploadImageAsHostedContent, } from "../utils/attachments.js";
 import { detectContentType } from "../utils/content-type.js";
-import { buildFileAttachment, escapeHtml, formatFileSize, resolveChannelDriveItem, uploadFileToChannel, } from "../utils/file-upload.js";
+import { buildFileAttachment, encodeShareUrl, escapeHtml, formatFileSize, resolveChannelDriveItem, uploadFileToChannel, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml, searchUsers } from "../utils/users.js";
 /**
@@ -863,6 +863,81 @@ export function registerTeamsTools(server, graphService, readOnly) {
                         text: `❌ Error: ${errorMessage}`,
                     },
                 ],
+            };
+        }
+    });
+    // Get short-lived direct download URLs for channel message file attachments
+    server.tool("get_channel_attachment_download_url", "Get short-lived (~1 hour) pre-authenticated download URLs for the file attachments of a channel message or reply. The URLs download directly from SharePoint without auth headers (curl/browser friendly) — preferred over base64 downloads for anything larger than ~1 MB. Inline images (hosted content) have no download URL; use download_message_hosted_content for those.", {
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        messageId: z.string().describe("Message ID containing the attachments"),
+        replyId: z
+            .string()
+            .optional()
+            .describe("Reply ID — set to fetch attachments of a reply in the message thread"),
+    }, async ({ teamId, channelId, messageId, replyId }) => {
+        try {
+            const client = await graphService.getClient();
+            const messagePath = replyId
+                ? `/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies/${replyId}`
+                : `/teams/${teamId}/channels/${channelId}/messages/${messageId}`;
+            const message = (await client.api(messagePath).get());
+            const fileAttachments = (message.attachments ?? []).filter((att) => att.contentType === "reference" && att.contentUrl);
+            if (fileAttachments.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "No file attachments found in this message. Inline images (hosted content) can be fetched with download_message_hosted_content.",
+                        },
+                    ],
+                };
+            }
+            const results = [];
+            for (const att of fileAttachments) {
+                const contentUrl = att.contentUrl;
+                if (!contentUrl) {
+                    continue;
+                }
+                try {
+                    const item = (await client
+                        .api(`/shares/${encodeShareUrl(contentUrl)}/driveItem`)
+                        .get());
+                    results.push({
+                        name: att.name,
+                        size: item.size,
+                        downloadUrl: item["@microsoft.graph.downloadUrl"],
+                    });
+                }
+                catch (itemError) {
+                    results.push({
+                        name: att.name,
+                        error: itemError instanceof Error ? itemError.message : "Unknown error",
+                    });
+                }
+            }
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({
+                            note: "Download URLs are pre-authenticated and expire after about 1 hour.",
+                            attachments: results,
+                        }, null, 2),
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `❌ Failed to get download URLs: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
             };
         }
     });

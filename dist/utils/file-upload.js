@@ -325,4 +325,12 @@ export async function createUploadSessionForChannel(graphService, teamId, channe
     const { driveId, folderId } = await getChannelDrive(graphService, teamId, channelId);
     return createUploadSession(graphService, driveId, folderId, encodeURIComponent(fileName));
 }
+/** Encode a SharePoint/OneDrive URL for the Graph Shares API ("u!" base64url format). */
+export function encodeShareUrl(url) {
+    return `u!${Buffer.from(url)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "")}`;
+}
 //# sourceMappingURL=file-upload.js.map

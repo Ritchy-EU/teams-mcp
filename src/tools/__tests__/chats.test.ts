@@ -2382,9 +2382,7 @@ describe("Chat Tools", () => {
 
       const result = await createSessionHandler({ fileName: "a.txt", target: "chat" });
 
-      expect(result.content[0].text).toBe(
-        "❌ Failed to create upload session: Drive unavailable"
-      );
+      expect(result.content[0].text).toBe("❌ Failed to create upload session: Drive unavailable");
       expect(result.isError).toBe(true);
     });
   });

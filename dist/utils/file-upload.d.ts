@@ -72,4 +72,6 @@ export interface UploadSessionInfo {
 export declare function createUploadSessionForChat(graphService: IGraphService, fileName: string): Promise<UploadSessionInfo>;
 /** Create a resumable upload session in a channel's SharePoint folder. */
 export declare function createUploadSessionForChannel(graphService: IGraphService, teamId: string, channelId: string, fileName: string): Promise<UploadSessionInfo>;
+/** Encode a SharePoint/OneDrive URL for the Graph Shares API ("u!" base64url format). */
+export declare function encodeShareUrl(url: string): string;
 //# sourceMappingURL=file-upload.d.ts.map
