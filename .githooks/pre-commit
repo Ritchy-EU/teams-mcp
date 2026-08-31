@@ -1,0 +1,10 @@
+#!/bin/sh
+# Block commits that would fail the CI lint/format gate (biome ci src/).
+# Fix problems with: npx biome check --write src/
+echo "pre-commit: biome ci src/"
+npx biome ci src/ || {
+  echo ""
+  echo "Commit blocked: biome found problems."
+  echo "Run 'npx biome check --write src/' to fix formatting, then retry."
+  exit 1
+}
