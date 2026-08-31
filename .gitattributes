@@ -1,0 +1,6 @@
+# Normalize all text files to LF in the repository and in the working tree.
+#
+# Without this, a Windows checkout with core.autocrlf=true drifts to CRLF while
+# Biome is configured for LF, so `npm run ci` fails on files nobody touched.
+# `text=auto` lets Git skip anything it detects as binary.
+* text=auto eol=lf
