@@ -212,7 +212,7 @@ npm run build && node dist/index.js
 
 #### Chat Operations
 - `list_chats` - List user's chats (1:1 and group)
-- `get_chat_messages` - Retrieve messages from a specific chat with pagination and filtering
+- `get_chat_messages` - Retrieve messages from a specific chat with pagination and filtering; system events (members added, chat renamed, call started/ended) come back with a parsed `eventDetail`, and `onlyCallEvents` returns just call events plus a `calls` array (start, end, duration, initiator, participants) for time analysis
 - `send_chat_message` - Send a message to a chat
 - `create_chat` - Create a new 1:1 or group chat
 - `rename_chat` - Rename a group chat (change its topic)

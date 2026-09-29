@@ -329,6 +329,7 @@ describe("Chat Tools", () => {
       ];
 
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: mockMessages }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -364,6 +365,7 @@ describe("Chat Tools", () => {
       ];
 
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: mockMessages }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -417,6 +419,7 @@ describe("Chat Tools", () => {
       ];
 
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: mockMessages }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -444,6 +447,7 @@ describe("Chat Tools", () => {
       ];
 
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: mockMessages }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -459,6 +463,7 @@ describe("Chat Tools", () => {
 
     it("should handle no messages found", async () => {
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: [] }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -472,6 +477,7 @@ describe("Chat Tools", () => {
 
     it("should handle errors", async () => {
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockRejectedValue(new Error("Chat not found")),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -491,6 +497,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: mockMessages,
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/nextPage",
@@ -534,6 +541,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain1 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: page1Messages,
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/nextPage2",
@@ -541,6 +549,7 @@ describe("Chat Tools", () => {
         };
 
         const mockApiChain2 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: page2Messages,
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/nextPage3",
@@ -548,6 +557,7 @@ describe("Chat Tools", () => {
         };
 
         const mockApiChain3 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: page3Messages,
             "@odata.nextLink": undefined, // No more pages
@@ -589,6 +599,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain1 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: page1Messages,
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/nextPage2",
@@ -596,6 +607,7 @@ describe("Chat Tools", () => {
         };
 
         const mockApiChain2 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: page2Messages,
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/nextPage3",
@@ -630,6 +642,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: mockMessages,
             "@odata.nextLink": undefined, // No more pages
@@ -659,6 +672,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain1 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: page1Messages,
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/nextPage2",
@@ -666,6 +680,7 @@ describe("Chat Tools", () => {
         };
 
         const mockApiChain2 = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockRejectedValue(new Error("Network error")),
         };
 
@@ -694,6 +709,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: mockMessages,
           }),
@@ -721,6 +737,7 @@ describe("Chat Tools", () => {
         }));
 
         const mockApiChain = {
+          header: vi.fn().mockReturnThis(),
           get: vi.fn().mockResolvedValue({
             value: mockMessages,
           }),
@@ -1435,6 +1452,7 @@ describe("Chat Tools", () => {
       ];
 
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: mockMessages }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -1466,6 +1484,7 @@ describe("Chat Tools", () => {
       ];
 
       const mockApiChain = {
+        header: vi.fn().mockReturnThis(),
         get: vi.fn().mockResolvedValue({ value: mockMessages }),
       };
       mockClient.api = vi.fn().mockReturnValue(mockApiChain);
@@ -1474,6 +1493,308 @@ describe("Chat Tools", () => {
       const parsedResponse = JSON.parse(result.content[0].text);
 
       expect(parsedResponse.messages[0].reactions).toBeUndefined();
+    });
+  });
+
+  describe("get_chat_messages system events", () => {
+    let getChatMessagesHandler: (args?: any) => Promise<any>;
+
+    const plainMessage = (id: string, createdDateTime: string) => ({
+      id,
+      messageType: "message",
+      body: { content: `Message ${id}` },
+      from: { user: { id: "user-x", displayName: "Xavier" } },
+      createdDateTime,
+    });
+
+    const callStartedMessage = (id: string, createdDateTime: string, callId = "call-1") => ({
+      id,
+      messageType: "unknownFutureValue",
+      body: { contentType: "html", content: "<systemEventMessage/>" },
+      from: null,
+      createdDateTime,
+      eventDetail: {
+        "@odata.type": "#microsoft.graph.callStartedEventMessageDetail",
+        callId,
+        callEventType: "call",
+        initiator: { user: { id: "user-a", displayName: "Alice" } },
+      },
+    });
+
+    const callEndedMessage = (
+      id: string,
+      createdDateTime: string,
+      callDuration: string,
+      callId = "call-1"
+    ) => ({
+      id,
+      messageType: "systemEventMessage",
+      body: { contentType: "html", content: "<systemEventMessage/>" },
+      from: null,
+      createdDateTime,
+      eventDetail: {
+        "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+        callId,
+        callDuration,
+        callEventType: "call",
+        callParticipants: [
+          { participant: { user: { id: "user-a", displayName: "Alice" } } },
+          { participant: { user: { id: "user-b", displayName: "Bob" } } },
+        ],
+        initiator: { user: { id: "user-a", displayName: null } },
+      },
+    });
+
+    const membersAddedMessage = (id: string, createdDateTime: string) => ({
+      id,
+      messageType: "systemEventMessage",
+      body: { contentType: "html", content: "<systemEventMessage/>" },
+      createdDateTime,
+      eventDetail: {
+        "@odata.type": "#microsoft.graph.membersAddedEventMessageDetail",
+        members: [{ id: "user-b", displayName: "Bob" }],
+      },
+    });
+
+    const chain = (page: any) => ({
+      header: vi.fn().mockReturnThis(),
+      get: vi.fn().mockResolvedValue(page),
+    });
+
+    beforeEach(() => {
+      registerChatTools(mockServer, mockGraphService, false);
+      const call = vi
+        .mocked(mockServer.tool)
+        .mock.calls.find(([name]) => name === "get_chat_messages");
+      getChatMessagesHandler = call?.[3] as unknown as (args?: any) => Promise<any>;
+    });
+
+    it("sends Prefer: include-unknown-enum-members on every page request", async () => {
+      const page1 = chain({
+        value: [plainMessage("1", "2026-08-26T10:00:00Z")],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next",
+      });
+      const page2 = chain({ value: [plainMessage("2", "2026-08-26T09:00:00Z")] });
+      mockClient.api = vi.fn().mockReturnValueOnce(page1).mockReturnValueOnce(page2);
+
+      await getChatMessagesHandler({ chatId: "chat123", limit: 100, fetchAll: true });
+
+      expect(page1.header).toHaveBeenCalledWith("Prefer", "include-unknown-enum-members");
+      expect(page2.header).toHaveBeenCalledWith("Prefer", "include-unknown-enum-members");
+      expect(mockClient.api).toHaveBeenNthCalledWith(2, "https://graph.microsoft.com/v1.0/next");
+    });
+
+    it("returns system events by default with normalised messageType and parsed eventDetail", async () => {
+      mockClient.api = vi.fn().mockReturnValue(
+        chain({
+          value: [
+            callEndedMessage("3", "2026-08-26T08:47:00Z", "PT39M29S"),
+            plainMessage("2", "2026-08-26T08:30:00Z"),
+            callStartedMessage("1", "2026-08-26T08:07:31Z"),
+          ],
+        })
+      );
+
+      const result = await getChatMessagesHandler({ chatId: "chat123" });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.filters.includeSystemEvents).toBe(true);
+      expect(parsed.filters.onlyCallEvents).toBe(false);
+      expect(parsed.filteringMethod).toBe("server-side");
+      expect(parsed.calls).toBeUndefined();
+      expect(parsed.messages).toHaveLength(3);
+
+      const [ended, plain, started] = parsed.messages;
+      expect(ended.messageType).toBe("systemEventMessage");
+      expect(ended.eventDetail).toEqual({
+        type: "callEndedEventMessageDetail",
+        callId: "call-1",
+        callEventType: "call",
+        callDuration: "PT39M29S",
+        callDurationSeconds: 2369,
+        initiator: { id: "user-a" },
+        callParticipants: [
+          { id: "user-a", displayName: "Alice" },
+          { id: "user-b", displayName: "Bob" },
+        ],
+      });
+
+      expect(plain.messageType).toBe("message");
+      expect(plain.eventDetail).toBeUndefined();
+
+      // unknownFutureValue (no Prefer header honoured) is still recognised via eventDetail
+      expect(started.messageType).toBe("systemEventMessage");
+      expect(started.eventDetail.type).toBe("callStartedEventMessageDetail");
+      expect(started.eventDetail.initiator).toEqual({ id: "user-a", displayName: "Alice" });
+    });
+
+    it("passes non-call system events through as raw", async () => {
+      mockClient.api = vi
+        .fn()
+        .mockReturnValue(chain({ value: [membersAddedMessage("1", "2026-08-26T08:00:00Z")] }));
+
+      const result = await getChatMessagesHandler({ chatId: "chat123" });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.messages[0].eventDetail.type).toBe("membersAddedEventMessageDetail");
+      expect(parsed.messages[0].eventDetail.raw.members).toEqual([
+        { id: "user-b", displayName: "Bob" },
+      ]);
+    });
+
+    it("excludes system events when includeSystemEvents is false", async () => {
+      mockClient.api = vi.fn().mockReturnValue(
+        chain({
+          value: [
+            callEndedMessage("3", "2026-08-26T08:47:00Z", "PT39M29S"),
+            plainMessage("2", "2026-08-26T08:30:00Z"),
+            membersAddedMessage("1", "2026-08-26T08:00:00Z"),
+          ],
+        })
+      );
+
+      const result = await getChatMessagesHandler({
+        chatId: "chat123",
+        includeSystemEvents: false,
+      });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.filteringMethod).toBe("client-side");
+      expect(parsed.messages).toHaveLength(1);
+      expect(parsed.messages[0].id).toBe("2");
+      expect(parsed.totalRetrieved).toBe(3);
+      expect(parsed.totalReturned).toBe(1);
+    });
+
+    it("with onlyCallEvents pages until limit call events are found and stitches calls", async () => {
+      // Page 1: only regular messages and a members-added event -> keep paging
+      const page1 = chain({
+        value: [
+          plainMessage("10", "2026-08-26T13:00:00Z"),
+          membersAddedMessage("9", "2026-08-26T12:50:00Z"),
+        ],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next2",
+      });
+      // Page 2: an open call (started, not ended in range) and end of an older call
+      const page2 = chain({
+        value: [
+          callStartedMessage("8", "2026-08-26T12:22:00Z", "call-open"),
+          plainMessage("7", "2026-08-26T10:00:00Z"),
+          callEndedMessage("6", "2026-08-26T08:47:00Z", "PT39M29S", "call-fin"),
+        ],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next3",
+      });
+      // Page 3: start of the older call; would exceed limit if limit were 2
+      const page3 = chain({
+        value: [callStartedMessage("5", "2026-08-26T08:07:31Z", "call-fin")],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next4",
+      });
+      const page4 = chain({ value: [plainMessage("1", "2026-08-25T10:00:00Z")] });
+      mockClient.api = vi
+        .fn()
+        .mockReturnValueOnce(page1)
+        .mockReturnValueOnce(page2)
+        .mockReturnValueOnce(page3)
+        .mockReturnValueOnce(page4);
+
+      const result = await getChatMessagesHandler({
+        chatId: "chat123",
+        limit: 3,
+        onlyCallEvents: true,
+      });
+      const parsed = JSON.parse(result.content[0].text);
+
+      // 3 call events reached after page 3; page 4 must not be fetched
+      expect(mockClient.api).toHaveBeenCalledTimes(3);
+      expect(page4.get).not.toHaveBeenCalled();
+      expect(parsed.paginationEnabled).toBe(true);
+      expect(parsed.pagesRetrieved).toBe(3);
+      expect(parsed.filters.onlyCallEvents).toBe(true);
+      expect(parsed.hasMore).toBe(true);
+
+      expect(parsed.messages.map((m: any) => m.id)).toEqual(["8", "6", "5"]);
+      for (const m of parsed.messages) {
+        expect(m.messageType).toBe("systemEventMessage");
+        expect(m.eventDetail.type).toMatch(/^call(Started|Ended)EventMessageDetail$/);
+      }
+
+      expect(parsed.calls).toEqual([
+        {
+          callId: "call-open",
+          callEventType: "call",
+          startDateTime: "2026-08-26T12:22:00Z",
+          initiator: { id: "user-a", displayName: "Alice" },
+        },
+        {
+          callId: "call-fin",
+          callEventType: "call",
+          startDateTime: "2026-08-26T08:07:31Z",
+          endDateTime: "2026-08-26T08:47:00Z",
+          durationSeconds: 2369,
+          initiator: { id: "user-a", displayName: "Alice" },
+          participants: [
+            { id: "user-a", displayName: "Alice" },
+            { id: "user-b", displayName: "Bob" },
+          ],
+        },
+      ]);
+    });
+
+    it("with onlyCallEvents marks start as estimated when callStarted is outside the range", async () => {
+      mockClient.api = vi.fn().mockReturnValue(
+        chain({
+          value: [
+            plainMessage("2", "2026-08-26T09:00:00Z"),
+            callEndedMessage("1", "2026-08-26T08:47:00.000Z", "PT39M29S"),
+          ],
+        })
+      );
+
+      const result = await getChatMessagesHandler({ chatId: "chat123", onlyCallEvents: true });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.messages).toHaveLength(1);
+      expect(parsed.calls).toHaveLength(1);
+      expect(parsed.calls[0].startEstimated).toBe(true);
+      expect(parsed.calls[0].startDateTime).toBe("2026-08-26T08:07:31.000Z");
+      expect(parsed.calls[0].durationSeconds).toBe(2369);
+    });
+
+    it("with onlyCallEvents and no call events reports none", async () => {
+      mockClient.api = vi
+        .fn()
+        .mockReturnValue(chain({ value: [plainMessage("1", "2026-08-26T09:00:00Z")] }));
+
+      const result = await getChatMessagesHandler({ chatId: "chat123", onlyCallEvents: true });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.messages).toEqual([]);
+      expect(parsed.calls).toEqual([]);
+      expect(parsed.totalRetrieved).toBe(1);
+      expect(parsed.totalReturned).toBe(0);
+    });
+
+    it("applies since/until to call events too", async () => {
+      mockClient.api = vi.fn().mockReturnValue(
+        chain({
+          value: [
+            callEndedMessage("3", "2026-08-27T08:47:00Z", "PT5M", "call-b"),
+            callEndedMessage("2", "2026-08-26T08:47:00Z", "PT39M29S", "call-a"),
+            callStartedMessage("1", "2026-08-26T08:07:31Z", "call-a"),
+          ],
+        })
+      );
+
+      const result = await getChatMessagesHandler({
+        chatId: "chat123",
+        onlyCallEvents: true,
+        since: "2026-08-26T00:00:00Z",
+        until: "2026-08-27T00:00:00Z",
+      });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.messages.map((m: any) => m.id)).toEqual(["2", "1"]);
+      expect(parsed.calls.map((c: any) => c.callId)).toEqual(["call-a"]);
     });
   });
 

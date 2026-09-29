@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { collectMessageAttachments, extractHostedContentIds } from "../utils/attachments.js";
+import { INCLUDE_UNKNOWN_ENUM_MEMBERS_HEADER, isCallEventMessage, isSystemEventMessage, stitchCalls, summarizeEventDetail, } from "../utils/events.js";
 import { buildFileAttachment, createUploadSessionForChannel, createUploadSessionForChat, encodeShareUrl, escapeHtml, formatFileSize, grantChatMembersAccess, resolveChatDriveItem, uploadFileToChat, } from "../utils/file-upload.js";
 import { markdownToHtml } from "../utils/markdown.js";
 import { processMentionsInHtml } from "../utils/users.js";
@@ -63,7 +64,7 @@ export function registerChatTools(server, graphService, readOnly) {
         }
     });
     // Get chat messages with pagination support
-    server.tool("get_chat_messages", "Retrieve recent messages from a specific chat conversation. Returns message content, sender information, and timestamps.", {
+    server.tool("get_chat_messages", "Retrieve recent messages from a specific chat conversation. Returns message content, sender information, and timestamps. System events (members added, chat renamed, call started/ended) are returned with messageType 'systemEventMessage' and a parsed eventDetail; use onlyCallEvents to get just call events plus a 'calls' array (start, end, duration, initiator, participants) stitched by callId for time analysis.", {
         chatId: z.string().describe("Chat ID (e.g. 19:meeting_Njhi..j@thread.v2"),
         limit: z
             .number()
@@ -90,14 +91,35 @@ export function registerChatTools(server, graphService, readOnly) {
             .optional()
             .default(false)
             .describe("Fetch all messages using pagination (up to limit). When true, follows @odata.nextLink to get more messages."),
-    }, async ({ chatId, limit, since, until, fromUser, orderBy, descending, fetchAll }) => {
+        includeSystemEvents: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Include Teams system event messages (members added/removed, chat renamed, call started/ended, ...). Default: true."),
+        onlyCallEvents: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe("Return only call events (callStarted / callEnded) and a stitched 'calls' array; regular messages are skipped. Pages are followed automatically until 'limit' call events are found. Default: false."),
+    }, async ({ chatId, limit, since, until, fromUser, orderBy, descending, fetchAll, includeSystemEvents, onlyCallEvents, }) => {
         try {
             const client = await graphService.getClient();
             // Apply defaults for parameters (in case Zod validation is bypassed)
             const effectiveLimit = limit ?? 20;
             const effectiveOrderBy = orderBy ?? "createdDateTime";
             const effectiveDescending = descending ?? true;
-            const effectiveFetchAll = fetchAll ?? false;
+            const effectiveOnlyCallEvents = onlyCallEvents ?? false;
+            const effectiveIncludeSystemEvents = includeSystemEvents ?? true;
+            // Call events are sparse, so onlyCallEvents always pages until limit is reached.
+            const effectiveFetchAll = (fetchAll ?? false) || effectiveOnlyCallEvents;
+            // Message-type filter, applied client-side (Graph has no $filter for messageType).
+            const matchesTypeFilter = (message) => {
+                if (effectiveOnlyCallEvents)
+                    return isCallEventMessage(message);
+                if (!effectiveIncludeSystemEvents)
+                    return !isSystemEventMessage(message);
+                return true;
+            };
             // Build query parameters - use smaller page size for pagination
             const pageSize = effectiveFetchAll ? 50 : Math.min(effectiveLimit, 50);
             const queryParams = [`$top=${pageSize}`];
@@ -123,23 +145,32 @@ export function registerChatTools(server, graphService, readOnly) {
             let nextLink;
             let pageCount = 0;
             const maxPages = 100; // Safety limit to prevent infinite loops
-            // First request
+            // Number of fetched messages that survive the type filter (drives pagination).
+            let matchingCount = 0;
+            const collect = (page) => {
+                if (!page?.value)
+                    return;
+                allMessages.push(...page.value);
+                matchingCount += page.value.filter(matchesTypeFilter).length;
+            };
+            // First request. The Prefer header makes Graph report system events as
+            // messageType "systemEventMessage" instead of "unknownFutureValue".
             let response = (await client
                 .api(`/me/chats/${chatId}/messages?${queryString}`)
+                .header(...INCLUDE_UNKNOWN_ENUM_MEMBERS_HEADER)
                 .get());
-            if (response?.value) {
-                allMessages.push(...response.value);
-            }
+            collect(response);
             // Follow pagination if fetchAll is enabled
             if (effectiveFetchAll) {
                 nextLink = response["@odata.nextLink"];
-                while (nextLink && allMessages.length < effectiveLimit && pageCount < maxPages) {
+                while (nextLink && matchingCount < effectiveLimit && pageCount < maxPages) {
                     pageCount++;
                     try {
-                        response = (await client.api(nextLink).get());
-                        if (response?.value) {
-                            allMessages.push(...response.value);
-                        }
+                        response = (await client
+                            .api(nextLink)
+                            .header(...INCLUDE_UNKNOWN_ENUM_MEMBERS_HEADER)
+                            .get());
+                        collect(response);
                         nextLink = response["@odata.nextLink"];
                     }
                     catch (pageError) {
@@ -160,6 +191,9 @@ export function registerChatTools(server, graphService, readOnly) {
             }
             // Apply client-side filtering since server-side filtering is not supported
             let filteredMessages = allMessages;
+            if (effectiveOnlyCallEvents || !effectiveIncludeSystemEvents) {
+                filteredMessages = filteredMessages.filter(matchesTypeFilter);
+            }
             if (fromUser) {
                 filteredMessages = filteredMessages.filter((message) => message.from?.user?.id === fromUser);
             }
@@ -195,6 +229,12 @@ export function registerChatTools(server, graphService, readOnly) {
                     messageType: message.messageType ?? undefined,
                     importance: message.importance,
                 };
+                // System events: normalise messageType (Graph returns "unknownFutureValue"
+                // without the Prefer header) and expose the parsed event detail.
+                if (isSystemEventMessage(message)) {
+                    summary.messageType = "systemEventMessage";
+                    summary.eventDetail = summarizeEventDetail(message.eventDetail);
+                }
                 // File attachments plus inline images (contentType "hostedContent")
                 summary.attachments = collectMessageAttachments(message.attachments, message.body?.content);
                 // Include reactions if present
@@ -213,19 +253,35 @@ export function registerChatTools(server, graphService, readOnly) {
                 }
                 return summary;
             });
+            // Stitch callStarted/callEnded pairs into calls when only call events were requested.
+            const calls = effectiveOnlyCallEvents
+                ? stitchCalls(limitedMessages)
+                : undefined;
+            const clientSideFiltering = !!since ||
+                !!until ||
+                !!fromUser ||
+                effectiveOnlyCallEvents ||
+                !effectiveIncludeSystemEvents;
             return {
                 content: [
                     {
                         type: "text",
                         text: JSON.stringify({
-                            filters: { since, until, fromUser },
-                            filteringMethod: since || until || fromUser ? "client-side" : "server-side",
-                            paginationEnabled: fetchAll,
+                            filters: {
+                                since,
+                                until,
+                                fromUser,
+                                includeSystemEvents: effectiveIncludeSystemEvents,
+                                onlyCallEvents: effectiveOnlyCallEvents,
+                            },
+                            filteringMethod: clientSideFiltering ? "client-side" : "server-side",
+                            paginationEnabled: effectiveFetchAll,
                             pagesRetrieved: pageCount + 1,
                             totalRetrieved: allMessages.length,
                             totalReturned: messageList.length,
                             hasMore: !!response["@odata.nextLink"] || filteredMessages.length > limit,
                             messages: messageList,
+                            ...(calls ? { calls } : {}),
                         }, null, 2),
                     },
                 ],
