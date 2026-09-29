@@ -207,7 +207,15 @@ describe("events utilities", () => {
       expect(calls[0].startEstimated).toBe(true);
       expect(calls[0].startDateTime).toBe("2026-08-26T08:07:31.000Z");
       expect(calls[0].endDateTime).toBe("2026-08-26T08:47:00.000Z");
-      expect(calls[0].initiator).toEqual({ id: "user-a", displayName: undefined });
+      // initiator name is missing on callEnded but borrowed from the participant list
+      expect(calls[0].initiator).toEqual({ id: "user-a", displayName: "Alice" });
+    });
+
+    it("treats an empty-string initiator displayName as absent", () => {
+      const message = callEnded("2", "2026-08-26T08:47:00Z", "PT1M");
+      (message.eventDetail as any).initiator.user.displayName = "";
+      const summary = summarizeEventDetail(message.eventDetail);
+      expect(summary?.initiator).toEqual({ id: "user-a", displayName: undefined });
     });
 
     it("keeps an open call (no callEnded) without end or duration", () => {

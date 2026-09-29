@@ -82,7 +82,8 @@ function summarizeIdentity(identity: IdentitySet | null | undefined): IdentitySu
   if (!user) return undefined;
   return {
     id: user.id ?? undefined,
-    displayName: user.displayName ?? undefined,
+    // Graph sends "" for the initiator's displayName; treat it as absent.
+    displayName: user.displayName || undefined,
   };
 }
 
@@ -158,6 +159,12 @@ export function stitchCalls(messages: ChatMessage[]): CallSummary[] {
   }
 
   for (const call of byCallId.values()) {
+    // Graph omits the initiator's displayName on call events; borrow it from the participant list.
+    if (call.initiator?.id && !call.initiator.displayName) {
+      const match = call.participants?.find((p) => p.id === call.initiator?.id);
+      if (match?.displayName)
+        call.initiator = { ...call.initiator, displayName: match.displayName };
+    }
     if (!call.startDateTime && call.endDateTime && call.durationSeconds !== undefined) {
       const end = new Date(call.endDateTime).getTime();
       if (!Number.isNaN(end)) {
